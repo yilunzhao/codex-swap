@@ -54,6 +54,10 @@ A review of 0.1.0 turned up several ways to lose a credential. Everything in
   `--json export -` emitted the bundle instead of the usual result envelope.
 - `list --json` could not distinguish "no live login" from "unmanaged live
   login"; it now carries `liveEmail` and `liveManaged`.
+- Deeply nested JSON raised `RecursionError` out of `parse_auth` instead of
+  `AuthParseError`, so a pathological `auth.json` tracebacked out of the CLI.
+- A non-string `auth_mode` was carried unvalidated into `sequence.json` and the
+  `--json` output, where consumers expect a string.
 
 ### Security
 

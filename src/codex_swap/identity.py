@@ -48,7 +48,7 @@ def decode_jwt_payload(token: str) -> dict[str, Any]:
         return {}
     try:
         payload = json.loads(raw)
-    except (ValueError, UnicodeDecodeError):
+    except (ValueError, UnicodeDecodeError, RecursionError):
         return {}
     return payload if isinstance(payload, dict) else {}
 
@@ -64,6 +64,10 @@ def parse_auth(text: str) -> Identity:
         data = json.loads(text)
     except (ValueError, TypeError) as exc:
         raise AuthParseError(f"not valid JSON: {exc}") from exc
+    except RecursionError as exc:
+        # CPython's JSON scanner recurses per nesting level, so a pathological
+        # file raises this rather than ValueError. Still a malformed auth.json.
+        raise AuthParseError("not valid JSON: nesting is too deep to parse") from exc
     if not isinstance(data, dict):
         raise AuthParseError("expected a JSON object at the top level")
     return identity_from_dict(data)
@@ -77,6 +81,8 @@ def identity_from_dict(data: dict) -> Identity:
     api_key = api_key if isinstance(api_key, str) and api_key else None
 
     declared_mode = data.get("auth_mode")
+    if not isinstance(declared_mode, str):
+        declared_mode = ""
     mode = declared_mode or ("apikey" if api_key else "chatgpt")
 
     claims = decode_jwt_payload(tokens.get("id_token") or "")

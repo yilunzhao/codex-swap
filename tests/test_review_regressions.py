@@ -412,3 +412,57 @@ def test_purge_refuses_before_warning_or_prompting(tmp_path, capsys):
     assert "does not look like a codex-swap store" in captured.err
     assert "deletes every stored account" not in captured.out
     assert (victim / "keep").exists()
+
+
+class TestHostileAuthShapes:
+    """Both of these escaped `parse_auth`'s contract of raising only
+    `AuthParseError`, so they reached the CLI as a traceback or as a non-string
+    in the JSON output."""
+
+    def test_deeply_nested_json_is_a_parse_error(self):
+        from codex_swap.exceptions import AuthParseError
+        from codex_swap.identity import parse_auth
+
+        with pytest.raises(AuthParseError, match="nesting is too deep"):
+            parse_auth("[" * 200_000 + "]" * 200_000)
+
+    def test_a_deeply_nested_id_token_payload_degrades(self):
+        import base64
+
+        from codex_swap.identity import decode_jwt_payload
+
+        payload = base64.urlsafe_b64encode(b"[" * 200_000).decode().rstrip("=")
+        assert decode_jwt_payload(f"a.{payload}.c") == {}
+
+    def test_a_non_string_auth_mode_is_not_carried_into_the_store(self):
+        from codex_swap.identity import identity_from_dict
+
+        identity = identity_from_dict({"auth_mode": {"x": 1}, "OPENAI_API_KEY": "sk-abcdefgh"})
+        assert isinstance(identity.auth_mode, str)
+        assert identity.auth_mode == "apikey"
+
+    def test_the_cli_reports_a_hostile_auth_file_cleanly(self, tmp_path, capsys):
+        from codex_swap.fsutil import write_secret
+        from codex_swap.paths import auth_path
+
+        write_secret(auth_path(), "[" * 200_000 + "]" * 200_000)
+        capsys.readouterr()
+        assert main(["--store", str(tmp_path / "s"), "status"]) == 0
+        assert "No readable Codex login" in capsys.readouterr().out
+
+
+def test_the_migration_failure_path_reports_cleanly(tmp_path, monkeypatch):
+    """GAP: `raise StoreError("Migration … failed")` was never taken, so nothing
+    verified that a half-moved store surfaces as a message rather than a crash."""
+    import shutil
+
+    legacy = tmp_path / "home" / paths.LEGACY_STORE_DIRNAME
+    legacy.mkdir(parents=True)
+    (legacy / "sequence.json").write_text('{"accounts": {}}', encoding="utf-8")
+
+    def failing_move(src, dst):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(shutil, "move", failing_move)
+    with pytest.raises(StoreError, match=r"Migration .* failed"):
+        paths.migrate_legacy_store(tmp_path / "store")
