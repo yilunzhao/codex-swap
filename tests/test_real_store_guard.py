@@ -204,8 +204,18 @@ class TestBypassAttempts:
             subprocess.Popen(["codex", "login"])
 
     def test_handing_a_protected_path_to_a_subprocess_is_refused(self):
+        # `sys.executable` rather than a POSIX-only binary: the guard must fire
+        # before the spawn, so the program only has to exist on both platforms.
         with _blocked():
-            subprocess.Popen(["/bin/echo", str(SENTINEL / "auth.json")])
+            subprocess.Popen([sys.executable, "-c", "pass", str(SENTINEL / "auth.json")])
+
+    def test_a_windows_style_command_line_string_is_also_refused(self):
+        """On Windows the audit event carries one command-line string, not an
+        argv list; handling only the list shape left the guard inert there."""
+        from tests import conftest as _c
+
+        with _blocked():
+            _c._audit("subprocess.Popen", (None, "codex login", None, None))
 
     def test_an_unrelated_subprocess_is_still_allowed(self):
         """`ps` is how process detection works; blocking it would break the tool."""

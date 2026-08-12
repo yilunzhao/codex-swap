@@ -194,21 +194,35 @@ def _audit(event: str, args: tuple) -> None:
         # subprocess is a hole in every guarantee above. The one this codebase
         # actually reaches for is `codex login`, which rewrites the developer's
         # real auth.json; tests must inject a runner instead.
-        executable = args[0] if args else None
-        with contextlib.suppress(TypeError, ValueError):
-            name = os.path.basename(os.fsdecode(executable or ""))
-            if name in ("codex", "codex.exe"):
+        #
+        # The event's shape differs by platform: POSIX passes an executable plus
+        # an argv list, Windows passes executable=None and a single command-line
+        # string. Both are normalised here — handling only the POSIX shape meant
+        # the guard silently did nothing on Windows.
+        words: list[str] = []
+        for candidate in (args[0] if args else None, args[1] if len(args) > 1 else None):
+            if candidate is None:
+                continue
+            if isinstance(candidate, (list, tuple)):
+                for item in candidate:
+                    with contextlib.suppress(TypeError, ValueError):
+                        words.append(os.fsdecode(item))
+            else:
+                with contextlib.suppress(TypeError, ValueError):
+                    words.extend(os.fsdecode(candidate).split())
+
+        # The program is whichever of the first couple of words names a binary.
+        for word in words[:2]:
+            if os.path.basename(word.replace("\\", "/")).lower() in ("codex", "codex.exe"):
                 raise RealStoreWriteBlocked(
                     "test process tried to spawn the real `codex` binary, which would "
                     "rewrite real credentials; inject a runner instead"
                 )
-        argv = args[1] if len(args) > 1 else ()
-        if isinstance(argv, (list, tuple)):
-            for item in argv:
-                if _is_protected(item):
-                    raise RealStoreWriteBlocked(
-                        f"test process tried to hand a real Codex path to a subprocess: {item!r}"
-                    )
+        for word in words:
+            if _is_protected(word):
+                raise RealStoreWriteBlocked(
+                    f"test process tried to hand a real Codex path to a subprocess: {word!r}"
+                )
         return
     else:
         return
