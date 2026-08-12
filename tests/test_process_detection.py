@@ -8,7 +8,14 @@ import subprocess
 import pytest
 
 from codex_swap import process_detection
-from codex_swap.process_detection import CodexProcess, ProcessScan, _classify, scan
+from codex_swap.process_detection import (
+    CodexProcess,
+    ProcessScan,
+    _classify,
+    _scan_posix,
+    _scan_windows,
+    scan,
+)
 
 # A real `ps -axo pid=,ppid=,command=` sample, trimmed to the shapes that a
 # naive matcher gets wrong on a live machine:
@@ -51,25 +58,25 @@ class TestDetection:
     def test_finds_the_core_binary_behind_a_node_shim(self, fake_ps):
         """The npm distribution shows up as `node /path/bin/codex ...`."""
         fake_ps("  741   735 node /Users/me/.nvm/versions/node/v22/bin/codex app-server\n")
-        result = scan(exclude_self=False)
+        result = _scan_posix(set())
         assert [p.pid for p in result.holders] == [741]
         assert result.holders[0].role == "app-server"
 
     def test_one_session_behind_a_shim_counts_once(self, fake_ps):
         """The shim spawns the native binary; both are the same session."""
         fake_ps(PS_SAMPLE)
-        holders = scan(exclude_self=False).holders
+        holders = _scan_posix(set()).holders
         assert 742 not in {p.pid for p in holders}, "native child double-counted"
         assert 741 in {p.pid for p in holders}
 
     def test_counts_only_credential_holding_processes(self, fake_ps):
         fake_ps(PS_SAMPLE)
-        result = scan(exclude_self=False)
+        result = _scan_posix(set())
         assert {p.pid for p in result.holders} == {741, 6117, 6118, 6119}
 
     def test_helpers_are_counted_separately(self, fake_ps):
         fake_ps(PS_SAMPLE)
-        result = scan(exclude_self=False)
+        result = _scan_posix(set())
         assert {p.pid for p in result.helpers} == {1405, 7792}
         assert all(p.name in process_detection.HELPER_NAMES for p in result.helpers)
 
@@ -83,14 +90,14 @@ class TestDetection:
     )
     def test_unrelated_processes_are_ignored(self, fake_ps, pid, why):
         fake_ps(PS_SAMPLE)
-        result = scan(exclude_self=False)
+        result = _scan_posix(set())
         seen = {p.pid for p in result.holders} | {p.pid for p in result.helpers}
         assert pid not in seen, why
 
     def test_codex_swap_itself_is_not_counted(self, fake_ps):
         """Otherwise every run would warn about itself."""
         fake_ps("  100     1 /usr/local/bin/codex-swap switch\n")
-        result = scan(exclude_self=False)
+        result = _scan_posix(set())
         assert result.holders == [] and result.helpers == []
 
 
@@ -116,7 +123,7 @@ class TestRoles:
 
     def test_summary_groups_by_label(self, fake_ps):
         fake_ps(PS_SAMPLE)
-        summary = scan(exclude_self=False).summary()
+        summary = _scan_posix(set()).summary()
         assert "1 x codex app-server" in summary
         assert "codex tui" in summary
         assert "codex exec" in summary
@@ -127,38 +134,48 @@ class TestRoles:
 
 
 class TestRobustness:
-    def test_scan_excludes_the_current_process(self, fake_ps):
+    def test_the_current_process_can_be_excluded(self, fake_ps):
         fake_ps(f"{os.getpid()} 1 /usr/local/bin/codex exec\n  999 1 /usr/local/bin/codex\n")
-        assert {p.pid for p in scan(exclude_self=True).holders} == {999}
+        assert {p.pid for p in _scan_posix({os.getpid()}).holders} == {999}
+
+    def test_scan_dispatches_to_the_platform_parser_and_excludes_itself(self, fake_ps):
+        """`scan()` is the only entry point that knows about os.name."""
+        if os.name == "nt":
+            row = '"codex.exe","{pid}","Console","1","1 K"\n'
+            listing = row.format(pid=os.getpid()) + row.format(pid=999)
+        else:
+            listing = f"{os.getpid()} 1 /usr/local/bin/codex exec\n  999 1 /usr/local/bin/codex\n"
+        fake_ps(listing)
+        assert {p.pid for p in scan().holders} == {999}
 
     def test_unavailable_listing_is_reported_not_raised(self, fake_ps):
         fake_ps("", fail=True)
-        result = scan(exclude_self=False)
+        result = _scan_posix(set())
         assert result.unavailable is True
         assert result.holders == []
         assert bool(result) is False
 
     def test_timeout_is_treated_as_unavailable(self, fake_ps):
         fake_ps("", timeout=True)
-        assert scan(exclude_self=False).unavailable is True
+        assert _scan_posix(set()).unavailable is True
 
     def test_empty_listing(self, fake_ps):
         fake_ps("")
-        result = scan(exclude_self=False)
+        result = _scan_posix(set())
         assert result.holders == [] and result.helpers == []
         assert result.unavailable is False
 
     def test_malformed_lines_are_skipped(self, fake_ps):
         fake_ps("\n\ngarbage\n  abc 1 /usr/local/bin/codex\n  12 \n  13 x /usr/bin/codex\n")
-        result = scan(exclude_self=False)
+        result = _scan_posix(set())
         # `13 x ...` has a non-numeric ppid but a valid pid: still a real process.
         assert {p.pid for p in result.holders} == {13}
 
     def test_scan_is_truthy_only_when_holders_exist(self, fake_ps):
         fake_ps("  12 1 /usr/local/bin/codex\n")
-        assert bool(scan(exclude_self=False)) is True
+        assert bool(_scan_posix(set())) is True
         fake_ps("  12 1 /usr/local/bin/codex-code-mode-host\n")
-        assert bool(scan(exclude_self=False)) is False
+        assert bool(_scan_posix(set())) is False
 
     def test_windows_exe_suffix_is_stripped(self):
         probe = ProcessScan()
@@ -180,3 +197,47 @@ class TestRobustness:
         probe = ProcessScan()
         _classify(1, ["/usr/bin/vim", "--", "/some/dir/codex"], probe)
         assert probe.holders == []
+
+
+class TestWindowsListing:
+    """`tasklist` output, parsed on every platform so the Windows path is not
+    only exercised by the one Windows CI job."""
+
+    SAMPLE = (
+        '"codex.exe","741","Console","1","120,000 K"\n'
+        '"codex-code-mode-host.exe","1405","Console","1","30,000 K"\n'
+        '"node.exe","735","Console","1","80,000 K"\n'
+        '"python.exe","8000","Console","1","40,000 K"\n'
+    )
+
+    def test_identifies_the_core_binary(self, fake_ps):
+        fake_ps(self.SAMPLE)
+        result = _scan_windows(set())
+        assert {p.pid for p in result.holders} == {741}
+
+    def test_identifies_helpers(self, fake_ps):
+        fake_ps(self.SAMPLE)
+        assert {p.pid for p in _scan_windows(set()).helpers} == {1405}
+
+    def test_ignores_unrelated_images(self, fake_ps):
+        fake_ps(self.SAMPLE)
+        result = _scan_windows(set())
+        seen = {p.pid for p in result.holders} | {p.pid for p in result.helpers}
+        assert 735 not in seen and 8000 not in seen
+
+    def test_role_is_unknown_without_a_command_line(self, fake_ps):
+        """`tasklist` gives no argv, so every holder is reported as a bare session."""
+        fake_ps(self.SAMPLE)
+        assert _scan_windows(set()).holders[0].role == "tui"
+
+    def test_excludes_the_given_pids(self, fake_ps):
+        fake_ps(self.SAMPLE)
+        assert _scan_windows({741}).holders == []
+
+    def test_unavailable_tasklist(self, fake_ps):
+        fake_ps("", fail=True)
+        assert _scan_windows(set()).unavailable is True
+
+    def test_malformed_rows_are_skipped(self, fake_ps):
+        fake_ps('"codex.exe"\n"codex.exe","notapid","Console","1","1 K"\n\n')
+        assert _scan_windows(set()).holders == []

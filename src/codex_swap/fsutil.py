@@ -53,12 +53,22 @@ def write_secret(path: Path, text: str) -> None:
 
 
 def read_text(path: Path) -> str | None:
-    """Read ``path`` as UTF-8, or None when it does not exist."""
+    """Read ``path`` as UTF-8, or None when there is no file there.
+
+    A directory is reported as "no file", not as an error, because callers use
+    this to ask whether an account blob exists. The explicit ``is_dir`` check is
+    load-bearing on Windows, which raises ``PermissionError`` rather than
+    ``IsADirectoryError`` when a directory is opened for reading — catching
+    ``PermissionError`` instead would swallow genuine permission problems on
+    real files.
+    """
     try:
+        if path.is_dir():
+            return None
         return path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return None
-    except IsADirectoryError:
+    except IsADirectoryError:  # pragma: no cover - POSIX race after the is_dir check
         return None
 
 

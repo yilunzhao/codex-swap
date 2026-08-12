@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 from pathlib import Path
 
 import pytest
@@ -121,11 +122,16 @@ class TestParseIso:
 
 
 class TestAbbreviate:
+    """Paths are rendered in the platform's own convention, so the expectations
+    are built with os.sep rather than hard-coded to POSIX."""
+
     def test_replaces_home(self, tmp_path):
-        assert printer.abbreviate(tmp_path / "x" / "y", home=tmp_path) == "~/x/y"
+        expected = os.sep.join(["~", "x", "y"])
+        assert printer.abbreviate(tmp_path / "x" / "y", home=tmp_path) == expected
 
     def test_leaves_other_paths_alone(self, tmp_path):
-        assert printer.abbreviate(Path("/etc/hosts"), home=tmp_path) == "/etc/hosts"
+        other = Path("/etc/hosts")
+        assert printer.abbreviate(other, home=tmp_path) == str(other)
 
     def test_accepts_a_string(self, tmp_path):
-        assert printer.abbreviate(str(tmp_path / "z"), home=tmp_path) == "~/z"
+        assert printer.abbreviate(str(tmp_path / "z"), home=tmp_path) == os.sep.join(["~", "z"])
