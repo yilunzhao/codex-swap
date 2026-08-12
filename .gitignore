@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+build/
+dist/
+wheels/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Environments
+.venv/
+venv/
+
+# Editors / OS
+.DS_Store
+.idea/
+*.swp
+
+# Never commit real credentials, including an accidental `codex-swap export`
+# landing in the working tree.
+*.codex-swap
+auth.json
+codex-accounts*.json

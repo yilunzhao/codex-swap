@@ -1,0 +1,17 @@
+name: Feature request
+description: Suggest something codex-swap should do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The workflow that is awkward today, not the solution you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would help
+      description: Optional. How you would expect it to behave.
