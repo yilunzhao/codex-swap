@@ -1,5 +1,9 @@
 # codex-swap
 
+[![CI](https://github.com/yilunzhao/codex-swap/actions/workflows/ci.yml/badge.svg)](https://github.com/yilunzhao/codex-swap/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Multi-account switcher for the [Codex CLI](https://github.com/openai/codex).
 
 Codex stores its entire login in one file — `~/.codex/auth.json` — and
