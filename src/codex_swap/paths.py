@@ -26,6 +26,7 @@ import shutil
 from pathlib import Path
 
 from codex_swap.exceptions import StoreError
+from codex_swap.locking import FileLock
 from codex_swap.models import Platform
 
 #: Store layout written by the pre-1.0 single-file prototype. Migrated once,
@@ -47,7 +48,12 @@ def auth_path() -> Path:
 
 
 def config_path() -> Path:
-    """Codex's TOML config. Read by ``doctor``; never modified by a swap."""
+    """Codex's TOML config. Reported by ``doctor``; never read or modified.
+
+    Its presence is worth knowing when diagnosing a Codex that behaves
+    differently after a swap, but nothing here parses it — a swap only ever
+    touches ``auth.json``.
+    """
     return codex_home() / "config.toml"
 
 
@@ -79,22 +85,6 @@ def store_root() -> Path:
     return Path.home() / ".codex-swap"
 
 
-def accounts_dir() -> Path:
-    return store_root() / "accounts"
-
-
-def sequence_path() -> Path:
-    return store_root() / "sequence.json"
-
-
-def lock_path() -> Path:
-    return store_root() / ".lock"
-
-
-def log_path() -> Path:
-    return store_root() / "codex-swap.log"
-
-
 def slugify(email: str) -> str:
     """Filename-safe rendering of an email for the on-disk blob name.
 
@@ -103,10 +93,6 @@ def slugify(email: str) -> str:
     """
     safe = "".join(c if (c.isalnum() or c in "._@+-") else "_" for c in email)
     return safe or "unknown"
-
-
-def account_blob_path(slot: int | str, email: str) -> Path:
-    return accounts_dir() / f"auth-{slot}-{slugify(email)}.json"
 
 
 # Artifacts any prior run may have created without user data being present. A
@@ -183,25 +169,35 @@ def migrate_legacy_store(target: Path | None = None) -> bool:
         flag.unlink(missing_ok=True)
         return False
 
-    try:
-        if flag.exists():
-            if target.exists():
-                shutil.rmtree(target)
-        elif target.exists():
-            if _has_meaningful_data(target):
+    # One lock for the whole check-and-move. `migrate_legacy_store` runs before
+    # the store (and its own lock) exists, so two first runs racing here could
+    # otherwise both pass `legacy.exists()` and have one delete what the other
+    # just migrated. The lock lives beside the store, not inside it, because the
+    # store directory is the thing being replaced.
+    with FileLock(target.parent / f".{target.name}.migrate.lock"):
+        if not legacy.exists():
+            flag.unlink(missing_ok=True)
+            return False
+        try:
+            # A target holding real data is never discarded, flag or no flag. An
+            # interrupted cross-filesystem move leaves the *legacy* copy partial
+            # and the target complete, so treating "flag present" as "target is
+            # garbage" would delete the good copy.
+            if target.exists() and _has_meaningful_data(target):
                 raise StoreError(
                     f"Both the legacy store ({legacy}) and the current one ({target}) "
                     f"hold data. Refusing to merge — inspect both and remove the stale "
                     f"one before re-running."
                 )
-            _clear(target)
+            if target.exists():
+                _clear(target)
 
-        target.parent.mkdir(parents=True, exist_ok=True)
-        flag.touch()
-        shutil.move(str(legacy), str(target))
-        _rename_legacy_accounts_dir(target)
-        flag.unlink(missing_ok=True)
-    except OSError as exc:
-        raise StoreError(f"Migration of {legacy} -> {target} failed: {exc}") from exc
+            target.parent.mkdir(parents=True, exist_ok=True)
+            flag.touch()
+            shutil.move(str(legacy), str(target))
+            _rename_legacy_accounts_dir(target)
+            flag.unlink(missing_ok=True)
+        except OSError as exc:
+            raise StoreError(f"Migration of {legacy} -> {target} failed: {exc}") from exc
 
     return True

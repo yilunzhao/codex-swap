@@ -29,6 +29,7 @@ import contextlib
 import json
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -45,19 +46,32 @@ class RealStoreWriteBlocked(Exception):
     """
 
 
+#: A root that exists only to be attacked. The control tests aim their write and
+#: delete probes here instead of at the developer's real ``~/.codex``: a probe
+#: that only passes while the guard works is a probe that deletes real
+#: credentials the day the guard regresses.
+SENTINEL_ROOT = Path(tempfile.gettempdir()) / "codex-swap-guard-sentinel-do-not-create"
+
+
 def _freeze_protected_roots() -> tuple[Path, ...]:
     """Snapshot the real Codex / codex-swap roots exactly once, at import."""
     overrides = ("CODEX_HOME", "CODEX_SWAP_HOME", "XDG_DATA_HOME")
     saved = {key: os.environ.get(key) for key in overrides}
 
-    roots: set[Path] = set()
+    roots: set[Path] = {SENTINEL_ROOT}
 
     def _collect() -> None:
         from codex_swap import paths
 
         for resolver in (paths.codex_home, paths.store_root, paths.legacy_store_root):
             with contextlib.suppress(OSError, RuntimeError):  # pragma: no cover
-                roots.add(Path(os.path.abspath(resolver())))
+                resolved = resolver()
+                roots.add(Path(os.path.abspath(resolved)))
+                # `abspath` does not follow symlinks, so a home directory (or a
+                # ~/.codex) that is itself a link would otherwise never compare
+                # equal to the path a write actually lands on.
+                with contextlib.suppress(OSError):
+                    roots.add(Path(resolved).resolve())
 
     # Both notions of "real" are protected: the genuine defaults, and whatever
     # the developer actually has exported in their shell.
@@ -78,21 +92,78 @@ def _freeze_protected_roots() -> tuple[Path, ...]:
 
 PROTECTED_ROOTS = _freeze_protected_roots()
 
+#: The real roots only, for the assertion that the guard covers them. Excluded
+#: from the probes so that no test ever aims a delete at real credentials.
+REAL_PROTECTED_ROOTS = tuple(r for r in PROTECTED_ROOTS if r != SENTINEL_ROOT)
+
 _WRITE_MODE_CHARS = frozenset("wxa+")
 
 
-def _is_protected(target) -> bool:
-    if target is None:
-        return False
+def _path_of_fd(fd: int) -> str | None:
+    """Best-effort path for an open descriptor.
+
+    Needed because ``shutil.rmtree`` walks with ``dir_fd`` and deletes children
+    by *relative* name, so the per-file audit events carry "auth.json" and
+    nothing else. Resolving those against the process CWD — which is what
+    ``abspath`` does — makes every one of them invisible to the guard.
+    """
+    if sys.platform == "darwin":
+        try:
+            import fcntl
+
+            F_GETPATH = 50  # <sys/fcntl.h>; absent from the fcntl module
+            buf = fcntl.fcntl(fd, F_GETPATH, b"\0" * 1024)
+            return buf.split(b"\0", 1)[0].decode()
+        except (OSError, ImportError, ValueError, UnicodeDecodeError):
+            return None
     try:
-        path = Path(os.path.abspath(os.fspath(target)))
+        return os.readlink(f"/proc/self/fd/{fd}")
+    except OSError:
+        return None
+
+
+def _candidate_paths(target, dir_fd=None):
+    """Every filesystem path a write argument could denote."""
+    if target is None:
+        return
+    if isinstance(target, int):
+        # An fd-based call (ftruncate/fchmod); resolve it or treat as unknown.
+        resolved = _path_of_fd(target)
+        if resolved:
+            yield Path(resolved)
+        return
+    try:
+        # `os.fsdecode` accepts str, bytes and PathLike alike — `os.fspath`
+        # raises TypeError on bytes, which the old guard swallowed into "safe".
+        text = os.fsdecode(target)
     except (TypeError, ValueError):
-        return False
-    return any(path == root or root in path.parents for root in PROTECTED_ROOTS)
+        return
+
+    if dir_fd is not None and not os.path.isabs(text):
+        base = _path_of_fd(dir_fd)
+        if base:
+            yield Path(os.path.abspath(os.path.join(base, text)))
+            return
+        # Descriptor could not be resolved on this platform. Fall through to the
+        # CWD interpretation — no worse than having no dir_fd handling at all,
+        # and the front-door `shutil.rmtree` check still stands. Refusing here
+        # instead would block pytest's own tmp-directory cleanup, which walks
+        # with dir_fd exactly the same way.
+
+    yield Path(os.path.abspath(text))
+    with contextlib.suppress(OSError, RuntimeError):
+        yield Path(text).resolve()
+
+
+def _is_protected(target, dir_fd=None) -> bool:
+    for path in _candidate_paths(target, dir_fd):
+        if any(path == root or root in path.parents for root in PROTECTED_ROOTS):
+            return True
+    return False
 
 
 def _audit(event: str, args: tuple) -> None:
-    target = None
+    targets: list[tuple[object, object]] = []
     if event == "open":
         # (path, mode, flags); mode is None for os.open-style calls, where the
         # flags int carries the intent instead.
@@ -105,27 +176,49 @@ def _audit(event: str, args: tuple) -> None:
                 return
         elif not (_WRITE_MODE_CHARS & set(str(mode))):
             return
-        target = args[0]
+        targets = [(args[0], None)]
     elif event in ("os.rename", "os.replace", "os.link", "os.symlink"):
-        target = args[1] if len(args) > 1 else None
-    elif event in (
-        "os.remove",
-        "os.unlink",
-        "os.mkdir",
-        "os.rmdir",
-        "os.truncate",
-        "os.chmod",
-        "shutil.rmtree",
-    ):
-        target = args[0] if args else None
+        # (src, dst, src_dir_fd, dst_dir_fd) — only the destination is written.
+        dst_dir_fd = args[3] if len(args) > 3 else None
+        targets = [(args[1] if len(args) > 1 else None, dst_dir_fd)]
+    elif event in ("os.remove", "os.unlink", "os.rmdir", "os.truncate"):
+        dir_fd = args[1] if len(args) > 1 else None
+        targets = [(args[0] if args else None, dir_fd)]
+    elif event == "os.mkdir" or event == "os.chmod":
+        dir_fd = args[2] if len(args) > 2 else None
+        targets = [(args[0] if args else None, dir_fd)]
+    elif event == "shutil.rmtree":
+        targets = [(args[0] if args else None, None)]
+    elif event == "subprocess.Popen":
+        # Audit hooks are per-process and children never inherit them, so any
+        # subprocess is a hole in every guarantee above. The one this codebase
+        # actually reaches for is `codex login`, which rewrites the developer's
+        # real auth.json; tests must inject a runner instead.
+        executable = args[0] if args else None
+        with contextlib.suppress(TypeError, ValueError):
+            name = os.path.basename(os.fsdecode(executable or ""))
+            if name in ("codex", "codex.exe"):
+                raise RealStoreWriteBlocked(
+                    "test process tried to spawn the real `codex` binary, which would "
+                    "rewrite real credentials; inject a runner instead"
+                )
+        argv = args[1] if len(args) > 1 else ()
+        if isinstance(argv, (list, tuple)):
+            for item in argv:
+                if _is_protected(item):
+                    raise RealStoreWriteBlocked(
+                        f"test process tried to hand a real Codex path to a subprocess: {item!r}"
+                    )
+        return
     else:
         return
 
-    if _is_protected(target):
-        raise RealStoreWriteBlocked(
-            f"test process attempted to write real Codex data: {target!r} "
-            f"(protected roots: {[str(r) for r in PROTECTED_ROOTS]})"
-        )
+    for target, dir_fd in targets:
+        if _is_protected(target, dir_fd):
+            raise RealStoreWriteBlocked(
+                f"test process attempted to write real Codex data: {target!r} "
+                f"(protected roots: {[str(r) for r in PROTECTED_ROOTS]})"
+            )
 
 
 sys.addaudithook(_audit)

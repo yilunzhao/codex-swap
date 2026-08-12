@@ -111,6 +111,14 @@ def abbreviate(path, *, home=None) -> str:
 
     text = str(path)
     root = str(home or pathlib.Path.home())
-    if root and text.startswith(root):
-        return "~" + text[len(root) :]
+    if not root:
+        return text
+    if text == root:
+        return "~"
+    # The separator check is what stops /home/bobby being rendered as ~by under
+    # a home of /home/bob. A root that already ends in a separator (HOME=/ in a
+    # container) must not have a second one demanded.
+    prefix = root if root.endswith(os.sep) else root + os.sep
+    if text.startswith(prefix):
+        return "~" + os.sep + text[len(prefix) :]
     return text

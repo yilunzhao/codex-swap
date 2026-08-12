@@ -114,9 +114,15 @@ def test_newlines_are_not_translated(tmp_path):
 
 
 def test_ensure_private_dir_is_idempotent(tmp_path):
+    """Called on every write, so a second call must not fail or reset the mode."""
     path = tmp_path / "accounts"
-    assert ensure_private_dir(path) == path
-    assert ensure_private_dir(path) == path
+    ensure_private_dir(path)
+    (path / "existing.json").write_text("keep me", encoding="utf-8")
+    ensure_private_dir(path)
+    assert path.is_dir()
+    assert (path / "existing.json").read_text(encoding="utf-8") == "keep me"
+    if sys.platform != "win32":
+        assert path.stat().st_mode & 0o777 == 0o700
 
 
 def test_write_secret_accepts_a_path_like(tmp_path):

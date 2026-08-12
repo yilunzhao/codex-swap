@@ -1,6 +1,6 @@
 [project]
 name = "codex-swap"
-version = "0.1.0"
+version = "0.2.0"
 description = "Multi-account switcher for the Codex CLI"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -60,6 +60,10 @@ markers = [
 [tool.coverage.run]
 branch = true
 source = ["codex_swap"]
+# Exercised by `test_module_entry_point_runs`, which necessarily spawns a
+# separate interpreter — coverage cannot see into it, so measuring it here would
+# report 0% for code that is in fact tested.
+omit = ["*/__main__.py"]
 
 [tool.coverage.report]
 exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]

@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 from codex_swap import __version__, paths, printer, process_detection
-from codex_swap.exceptions import CodexSwapError, StoreError
+from codex_swap.exceptions import CodexSwapError, StoreError, ValidationError
 from codex_swap.fsutil import is_private, read_text, write_secret
 from codex_swap.identity import try_parse_auth
 from codex_swap.models import Identity, Platform
@@ -90,7 +90,12 @@ def _report_processes(args: argparse.Namespace) -> dict:
     }
     if args.json:
         return payload
-    if scan.holders:
+    if scan.unavailable:
+        # Silence here would read as "nothing is running", which is the one
+        # conclusion this check must never imply without having actually run.
+        printer.warn("could not read the process list, so no running Codex check was made.")
+        print(dim("  Quit any running Codex before using the new account."))
+    elif scan.holders:
         printer.warn(f"{len(scan.holders)} Codex process(es) still running: {scan.summary()}")
         print(
             dim(
@@ -154,6 +159,8 @@ def cmd_list(args: argparse.Namespace, sw: Switcher) -> int:
                 "store": str(sw.store.root),
                 "activeSlot": state.active_slot,
                 "liveSlot": live_account.slot if live_account else None,
+                "liveEmail": live_identity.email if live_identity else None,
+                "liveManaged": live_account is not None,
                 "accounts": [dict(_account_payload(a, i), stored=stored) for a, i, stored in rows],
             },
         )
@@ -245,6 +252,8 @@ def _render_switch(args: argparse.Namespace, result) -> int:
             "previousSlot": result.previous.slot if result.previous else None,
             "backedUp": result.backed_up,
             "discarded": result.discarded.email if result.discarded else None,
+            "discardedUnreadable": result.discarded_unreadable,
+            "alreadyActive": result.already_active,
         }
         payload["processes"] = _report_processes(args)
         _emit(args, payload)
@@ -255,6 +264,18 @@ def _render_switch(args: argparse.Namespace, result) -> int:
             f"the previous login ({result.discarded.email}) was not managed and has "
             f"been replaced. It is gone unless you can log in again."
         )
+    if result.discarded_unreadable:
+        printer.warn(
+            "the previous auth.json could not be parsed and has been replaced. "
+            "If that was a real login, it is gone unless you can log in again."
+        )
+    if result.already_active:
+        print(
+            f"{cyan('Already on')} slot {bold(str(target.slot))}  "
+            f"{bold(target.email)}  {dim('[' + (target.plan or '?') + ']')}"
+        )
+        print(dim("  The stored copy was refreshed from the live file; nothing else changed."))
+        return 0
     print(
         f"{cyan('Switched to')} slot {bold(str(target.slot))}  "
         f"{bold(target.email)}  {dim('[' + (target.plan or '?') + ']')}"
@@ -276,7 +297,7 @@ def cmd_use(args: argparse.Namespace, sw: Switcher) -> int:
 def cmd_login(args: argparse.Namespace, sw: Switcher) -> int:
     if not args.json:
         print(cyan("Running `codex login` ..."))
-    result = sw.login(slot=args.slot, label=args.label or "")
+    result = sw.login(slot=args.slot, label=args.label or "", force=args.force)
     if args.json:
         _emit(args, {"added": _account_payload(result.account), "replaced": result.replaced})
         return 0
@@ -306,7 +327,24 @@ def cmd_export(args: argparse.Namespace, sw: Switcher) -> int:
     payload = json.dumps(bundle, indent=2) + "\n"
 
     if args.path == "-":
+        if args.json:
+            # Every other command emits the result envelope; writing the raw
+            # bundle here would break `--json export - | jq .exported`.
+            _emit(
+                args,
+                {
+                    "exported": len(bundle["accounts"]),
+                    "path": "-",
+                    "missing": missing,
+                    "bundle": bundle,
+                },
+            )
+            return 0
         sys.stdout.write(payload)
+        # To stderr, so it cannot corrupt a bundle being piped onward, but not
+        # silent: dropping accounts with no warning at all reads as success.
+        for item in missing:
+            printer.error(f"skipped {item}: no stored credentials")
         return 0
     target = Path(args.path).expanduser()
     write_secret(target, payload)
@@ -354,6 +392,14 @@ def cmd_purge(args: argparse.Namespace, sw: Switcher) -> int:
             print(dim("Nothing to purge."))
         _emit(args, {"purged": False, "path": str(root)})
         return 0
+    # Refuse before the scary warning and before prompting: being told "this
+    # deletes every stored account" and *then* that it was not a store at all
+    # reads as though something was destroyed.
+    if not sw.store.looks_like_store():
+        raise StoreError(
+            f"{root} does not look like a codex-swap store (no sequence.json and "
+            f"no accounts directory); refusing to delete it"
+        )
     if not args.json:
         printer.warn(f"This deletes every stored account: {root}")
         print(dim(f"Your live {sw.auth_file} is left untouched."))
@@ -372,13 +418,20 @@ def cmd_purge(args: argparse.Namespace, sw: Switcher) -> int:
 def cmd_doctor(args: argparse.Namespace, sw: Switcher) -> int:
     """Report everything needed to diagnose a swap that did not stick."""
     state = sw.store.load()
-    identity = sw.live_identity()
     scan = process_detection.scan()
 
     problems: list[str] = []
+    # doctor is the command people reach for when something is already broken,
+    # so it reports an unreadable auth.json as a finding rather than dying on it.
+    try:
+        identity = sw.live_identity()
+    except CodexSwapError as exc:
+        identity = None
+        problems.append(str(exc))
+
     if not sw.auth_file.exists():
         problems.append("no live Codex login (run `codex login`)")
-    elif identity is None:
+    elif identity is None and not problems:
         problems.append(f"{sw.auth_file} exists but could not be parsed")
     if sw.auth_file.exists() and is_private(sw.auth_file) is False:
         problems.append(f"{sw.auth_file} is readable by other users")
@@ -395,7 +448,9 @@ def cmd_doctor(args: argparse.Namespace, sw: Switcher) -> int:
     )
     if live_is_unmanaged:
         problems.append(f"the live login ({identity.email}) is not managed")
-    if scan.holders:
+    if scan.unavailable:
+        problems.append("the process list could not be read, so no running-Codex check was made")
+    elif scan.holders:
         problems.append(
             f"{len(scan.holders)} Codex process(es) running — a swap may be overwritten"
         )
@@ -408,9 +463,14 @@ def cmd_doctor(args: argparse.Namespace, sw: Switcher) -> int:
                 "python": sys.version.split()[0],
                 "version": __version__,
                 "codexHome": str(paths.codex_home()),
+                "configToml": str(paths.config_path()) if paths.config_path().exists() else None,
                 "store": str(sw.store.root),
                 "managed": len(state.accounts),
-                "processes": {"holders": len(scan.holders), "helpers": len(scan.helpers)},
+                "processes": {
+                    "holders": len(scan.holders),
+                    "helpers": len(scan.helpers),
+                    "unavailable": scan.unavailable,
+                },
                 "problems": problems,
             },
         )
@@ -420,6 +480,7 @@ def cmd_doctor(args: argparse.Namespace, sw: Switcher) -> int:
     print(f"  version      {__version__}")
     print(f"  platform     {Platform.detect().name.lower()}  python {sys.version.split()[0]}")
     print(f"  CODEX_HOME   {printer.abbreviate(paths.codex_home())}")
+    print(f"  config.toml  {'present' if paths.config_path().exists() else dim('absent')}")
     print(f"  store        {printer.abbreviate(sw.store.root)}")
     print(f"  managed      {len(state.accounts)} account(s)")
     print(f"  live login   {identity.email if identity else dim('none')}")
@@ -533,6 +594,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_login = add_parser("login", help="run `codex login` and store the result")
     p_login.add_argument("--slot", type=int, help="slot to store it in")
     p_login.add_argument("--label", help="free-form note shown in `list`")
+    p_login.add_argument(
+        "--force", action="store_true", help="replace a different account already in --slot"
+    )
     p_login.set_defaults(func=cmd_login)
 
     p_remove = add_parser("remove", aliases=["rm"], help="forget an account")
@@ -568,6 +632,10 @@ def main(argv: list[str] | None = None) -> int:
     printer.set_color(False if (args.no_color or args.json) else None)
 
     try:
+        if args.store is not None and not args.store.strip():
+            # `--store ""` from an unset shell variable previously fell through
+            # to the default root, so `purge --yes` could delete the real store.
+            raise ValidationError("--store was given an empty path")
         # A prototype-era store is migrated once, before anything reads it.
         if args.store is None:
             paths.migrate_legacy_store()
@@ -579,6 +647,15 @@ def main(argv: list[str] | None = None) -> int:
         else:
             printer.error(str(exc))
         return exc.exit_code
+    except OSError as exc:
+        # ENOSPC/EROFS/EPERM on a store write would otherwise escape as a
+        # traceback, which exceptions.py promises never happens.
+        message = f"filesystem error: {exc}"
+        if args.json:
+            print(json.dumps({"error": message, "type": type(exc).__name__}, indent=2))
+        else:
+            printer.error(message)
+        return 1
     except KeyboardInterrupt:  # pragma: no cover - interactive only
         print()
         print(dim("Interrupted"))

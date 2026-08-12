@@ -28,6 +28,7 @@ from codex_swap.exceptions import (
     CodexCliError,
     StoreError,
     SwitchError,
+    ValidationError,
 )
 from codex_swap.fsutil import read_text, write_secret
 from codex_swap.identity import parse_auth, try_parse_auth
@@ -52,6 +53,10 @@ class SwitchResult:
     backed_up: bool = False
     #: Set when the live login was not managed and got overwritten anyway.
     discarded: Identity | None = None
+    #: The live file was present but unparseable, and has been replaced.
+    discarded_unreadable: bool = False
+    #: The requested account was already live; only the stored copy was refreshed.
+    already_active: bool = False
 
 
 @dataclass
@@ -106,6 +111,7 @@ class Switcher:
         label: str = "",
         force: bool = False,
         from_live: bool = False,
+        refresh_existing: bool = False,
     ) -> AddResult:
         """Capture an auth blob into the store.
 
@@ -113,14 +119,25 @@ class Switcher:
             text: raw ``auth.json`` contents.
             slot: explicit slot number; defaults to the lowest free one.
             label: free-form note shown in ``list``.
-            force: overwrite an existing account or an occupied slot.
+            force: replace a *different* account already sitting in the way.
             from_live: the blob came from the live file, so the resulting slot
                 is by definition the active one.
+            refresh_existing: update this same identity in place if it is already
+                managed. Separate from ``force`` so that re-storing an account
+                you already have never implies permission to destroy someone
+                else's credentials — the distinction ``login`` depends on.
 
         Raises:
+            ValidationError: the slot number is not a usable slot.
             AuthParseError: the blob carries no usable identity.
-            AccountExistsError: the account or slot is taken and force is unset.
+            AccountExistsError: the account or slot is taken and no permission
+                to replace it was given.
         """
+        if slot is not None and slot < 1:
+            raise ValidationError(
+                f"slot must be 1 or greater (got {slot}); a non-positive slot could "
+                f"be stored but never selected again"
+            )
         identity = parse_auth(text)
 
         with self.lock():
@@ -128,13 +145,25 @@ class Switcher:
             existing = self.store.find_by_key(state, identity.key)
 
             if existing is not None and slot is None:
-                if not force:
+                if not (force or refresh_existing):
                     raise AccountExistsError(
                         f"{identity.email} is already managed as slot {existing.slot}; "
                         f"pass --force to refresh it"
                     )
                 target_slot = existing.slot
             elif slot is not None:
+                # An identity already parked in a different slot must not be
+                # silently duplicated: two slots holding one account make it
+                # unresolvable by email and rotate through the same login twice.
+                if existing is not None and existing.slot != slot:
+                    if not (force or refresh_existing):
+                        raise AccountExistsError(
+                            f"{identity.email} is already managed as slot {existing.slot}; "
+                            f"pass --force to move it to slot {slot}"
+                        )
+                    self.store.delete_blob(existing)
+                    del state.accounts[existing.slot]
+                    state.sequence = [s for s in state.sequence if s in state.accounts]
                 occupant = state.accounts.get(slot)
                 if occupant is not None and occupant.key != identity.key and not force:
                     raise AccountExistsError(
@@ -146,10 +175,6 @@ class Switcher:
 
             replaced = target_slot in state.accounts
             old = state.accounts.get(target_slot)
-            if old is not None and old.email != identity.email:
-                # The blob file is named after the email, so a slot changing
-                # owner would otherwise strand the previous file.
-                self.store.delete_blob(old)
 
             account = Account.from_identity(
                 target_slot,
@@ -166,6 +191,12 @@ class Switcher:
             if from_live or state.active_slot is None:
                 state.active_slot = target_slot
             self.store.save(state)
+
+            # Only once the new state is committed. Deleting first would, on a
+            # failed save, leave sequence.json advertising an account whose
+            # credentials no longer exist.
+            if old is not None and old.email != identity.email:
+                self.store.delete_blob(old)
 
         self.store.log(f"add slot={account.slot} email={account.email} replaced={replaced}")
         return AddResult(account=account, replaced=replaced)
@@ -235,11 +266,31 @@ class Switcher:
             # Capture the (possibly token-refreshed) live blob before it is lost.
             backed_up = False
             discarded = None
+            discarded_unreadable = False
             if original is not None and previous is not None:
                 self.store.write_blob(previous, original)
                 backed_up = True
             elif original is not None and original_identity is not None:
                 discarded = original_identity
+            elif original is not None:
+                # Present but unparseable. Still being destroyed, so still worth
+                # saying out loud — an unknown token shape is likelier than junk.
+                discarded_unreadable = True
+
+            if previous is not None and previous.slot == target.slot:
+                # Already on this account. `blob` was read before the back-up
+                # above rewrote that very file, so writing it now would push the
+                # pre-refresh token back over a live one Codex has since
+                # renewed — losing exactly what the back-up just preserved.
+                state.active_slot = target.slot
+                self.store.save(state)
+                self.store.log(f"switch no-op slot={target.slot} (already active)")
+                return SwitchResult(
+                    target=target,
+                    previous=previous,
+                    backed_up=backed_up,
+                    already_active=True,
+                )
 
             self.write_live(blob)
             try:
@@ -259,7 +310,11 @@ class Switcher:
             f"backed_up={backed_up}"
         )
         return SwitchResult(
-            target=target, previous=previous, backed_up=backed_up, discarded=discarded
+            target=target,
+            previous=previous,
+            backed_up=backed_up,
+            discarded=discarded,
+            discarded_unreadable=discarded_unreadable,
         )
 
     def rotate(self) -> SwitchResult:
@@ -280,6 +335,7 @@ class Switcher:
         *,
         slot: int | None = None,
         label: str = "",
+        force: bool = False,
         runner: Callable[[Sequence[str]], int] | None = None,
     ) -> AddResult:
         """Snapshot the current login, run ``codex login``, store the result.
@@ -296,11 +352,12 @@ class Switcher:
         if original is not None:
             identity = try_parse_auth(original)
             if identity is not None:
-                state = self.store.load()
-                known = self.store.find_by_key(state, identity.key)
-                if known is not None:
-                    # Refresh the stored copy first; it may be stale.
-                    with self.lock():
+                # Load and write under one lock: a concurrent `remove` between
+                # the two would otherwise recreate a credential file for an
+                # account no longer in sequence.json.
+                with self.lock():
+                    known = self.store.find_by_key(self.store.load(), identity.key)
+                    if known is not None:
                         self.store.write_blob(known, original)
 
         code = run(["codex", "login"])
@@ -313,12 +370,33 @@ class Switcher:
         if new_text is None:
             raise CodexCliError(f"`codex login` reported success but {self.auth_file} is missing")
         # Whatever was just logged into should be stored, including a re-login
-        # of an account that already has a slot.
-        return self.add(new_text, slot=slot, label=label, force=True, from_live=True)
+        # of an account that already has a slot — but `refresh_existing`, not
+        # `force`: re-storing your own account must never carry permission to
+        # overwrite a *different* account that happens to occupy `slot`.
+        return self.add(
+            new_text,
+            slot=slot,
+            label=label,
+            force=force,
+            refresh_existing=True,
+            from_live=True,
+        )
 
     # -- transfer ---------------------------------------------------------
 
     def export_bundle(self) -> dict:
+        # Snapshot live first. Codex rewrites auth.json on every token refresh,
+        # so without this the bundle ships a pre-refresh credential for the one
+        # account the user is most likely to still be using.
+        with self.lock():
+            state = self.store.load()
+            original = self.live_auth()
+            identity = try_parse_auth(original)
+            if identity is not None:
+                live_account = self.store.find_by_key(state, identity.key)
+                if live_account is not None:
+                    self.store.write_blob(live_account, original)
+
         state = self.store.load()
         accounts = []
         missing = []
@@ -375,10 +453,34 @@ class Switcher:
     # -- destructive ------------------------------------------------------
 
     def purge(self) -> Path:
-        """Delete the whole store. The live ``auth.json`` is left alone."""
+        """Delete the whole store. The live ``auth.json`` is left alone.
+
+        Refuses a directory that does not look like a codex-swap store. `--store`
+        is a plain path, so a mistyped or unset variable would otherwise turn
+        `purge --yes` into an unbounded recursive delete of whatever it pointed
+        at.
+        """
         root = self.store.root
-        if root.exists():
-            shutil.rmtree(root)
+        if not root.exists():
+            return root
+        if not self.store.looks_like_store():
+            raise StoreError(
+                f"{root} does not look like a codex-swap store (no sequence.json and "
+                f"no accounts directory); refusing to delete it"
+            )
+        # The lock file itself is removed after the lock is released, so this
+        # works on Windows too, where an open file cannot be unlinked.
+        with self.lock():
+            for entry in root.iterdir():
+                if entry == self.store.lock_path:
+                    continue
+                if entry.is_dir() and not entry.is_symlink():
+                    shutil.rmtree(entry)
+                else:
+                    entry.unlink()
+        self.store.lock_path.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            root.rmdir()
         return root
 
 

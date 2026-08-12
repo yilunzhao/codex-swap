@@ -107,11 +107,6 @@ class Account:
     def key(self) -> tuple[str, str]:
         return (self.email, self.account_id)
 
-    @property
-    def display(self) -> str:
-        tag = self.plan or "?"
-        return f"{self.email} [{tag}]"
-
     @classmethod
     def from_identity(
         cls, slot: int, identity: Identity, *, label: str = "", added: str | None = None

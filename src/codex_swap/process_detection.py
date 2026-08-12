@@ -75,10 +75,10 @@ SUBCOMMANDS = frozenset(
 #: Interpreters that may front the real binary in the process listing.
 _LAUNCHERS = frozenset({"node", "npm", "npx", "bun", "deno", "python", "python3"})
 
-#: How far into argv to look for the real binary. argv[0] covers a direct
-#: launch, argv[1] covers `node /path/to/codex`; beyond that a match would more
-#: likely be a filename the user passed as an argument.
-_MAX_LAUNCHER_DEPTH = 2
+#: Upper bound on how many whitespace-separated fragments may be rejoined while
+#: reconstructing one argv entry. Real paths are a handful of fragments at most;
+#: the cap stops a long prompt from being scanned token by token.
+_MAX_PATH_FRAGMENTS = 8
 
 _PS_TIMEOUT = 5
 
@@ -142,24 +142,53 @@ def _role_of(args: list[str]) -> str:
     return "tui"
 
 
+def _candidates(tokens: list[str], start: int):
+    """Yield the plausible readings of the argv entry beginning at ``start``.
+
+    ``ps`` joins argv with spaces, so an executable path that itself contains a
+    space — ``~/Library/Application Support/...``, a standard editor-extension
+    location — is indistinguishable from two separate arguments. Splitting on
+    whitespace and looking only at the first fragment misses those entirely,
+    which is a false negative in the dangerous direction: the user is told
+    nothing is running while a live Codex is about to overwrite the swap.
+
+    Fragments are rejoined left to right, stopping before any fragment that
+    starts with "/" or "-". A continuation of the same path never does, while a
+    genuinely separate argument usually does — which is what keeps
+    ``vim /some/dir/codex`` from being read as the codex binary.
+    """
+    end = start
+    limit = min(len(tokens), start + _MAX_PATH_FRAGMENTS)
+    while end < limit:
+        yield " ".join(tokens[start : end + 1]), end + 1
+        nxt = end + 1
+        if nxt >= limit or tokens[nxt].startswith(("/", "-")):
+            return
+        end = nxt
+
+
 def _classify(pid: int, argv: list[str], scan: ProcessScan, ppid: int | None = None) -> None:
     """Add ``argv`` to ``scan`` if it is a Codex process."""
     if not argv:
         return
-    for index, token in enumerate(argv[:_MAX_LAUNCHER_DEPTH]):
-        name = _basename(token)
-        if name in HELPER_NAMES:
-            scan.helpers.append(CodexProcess(pid=pid, name=name, ppid=ppid))
+    start = 0
+    for _ in range(2):  # argv[0], then argv[1] when argv[0] is an interpreter
+        launcher_at = None
+        for candidate, rest in _candidates(argv, start):
+            name = _basename(candidate)
+            if name in HELPER_NAMES:
+                scan.helpers.append(CodexProcess(pid=pid, name=name, ppid=ppid))
+                return
+            if name == "codex":
+                scan.holders.append(
+                    CodexProcess(pid=pid, name="codex", role=_role_of(argv[rest:]), ppid=ppid)
+                )
+                return
+            if launcher_at is None and name in _LAUNCHERS:
+                launcher_at = rest
+        if launcher_at is None:
             return
-        if name == "codex":
-            scan.holders.append(
-                CodexProcess(pid=pid, name="codex", role=_role_of(argv[index + 1 :]), ppid=ppid)
-            )
-            return
-        # Only keep looking past argv[0] when it is an interpreter that could be
-        # fronting the real binary.
-        if index == 0 and name not in _LAUNCHERS:
-            return
+        start = launcher_at
 
 
 def _drop_wrapper_processes(scan: ProcessScan) -> None:

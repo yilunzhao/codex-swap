@@ -131,19 +131,39 @@ class TestLegacyMigration:
         assert paths.migrate_legacy_store(target) is True
         assert (target / "sequence.json").exists()
 
-    def test_resumes_an_interrupted_migration(self, tmp_path, monkeypatch):
-        """Flag present + legacy present means retry, not collision."""
+    def test_resumes_when_the_target_holds_nothing_of_value(self, tmp_path, monkeypatch):
+        """Flag present + a target of throwaway artifacts means retry."""
         self._legacy(tmp_path, monkeypatch)
         target = tmp_path / "new-store"
-        target.mkdir()
-        (target / "half-written.json").write_text("partial", encoding="utf-8")
+        (target / "cache").mkdir(parents=True)
+        (target / "codex-swap.log").write_text("noise", encoding="utf-8")
         flag = target.parent / f".{target.name}.migrating"
         flag.touch()
 
         assert paths.migrate_legacy_store(target) is True
         assert (target / "sequence.json").exists()
-        assert not (target / "half-written.json").exists()
         assert not flag.exists()
+
+    def test_refuses_to_discard_a_target_holding_data_even_with_the_flag(
+        self, tmp_path, monkeypatch
+    ):
+        """The flag must not be a licence to delete credentials.
+
+        An interrupted *cross-filesystem* move leaves the legacy copy partial and
+        the target complete — the exact inverse of what the flag was taken to
+        mean. Since the two cases are indistinguishable from disk, the only safe
+        reading is to refuse and let the user look.
+        """
+        self._legacy(tmp_path, monkeypatch)
+        target = tmp_path / "new-store"
+        (target / "accounts").mkdir(parents=True)
+        (target / "sequence.json").write_text('{"accounts": {}}', encoding="utf-8")
+        (target / "accounts" / "auth-1-a@example.com.json").write_text("precious", encoding="utf-8")
+        (target.parent / f".{target.name}.migrating").touch()
+
+        with pytest.raises(StoreError, match="Refusing to merge"):
+            paths.migrate_legacy_store(target)
+        assert (target / "accounts" / "auth-1-a@example.com.json").exists()
 
     def test_renames_the_prototype_accounts_directory(self, tmp_path, monkeypatch):
         """The prototype used `auth/`; without the rename every account would
@@ -178,8 +198,9 @@ class TestLegacyMigration:
         assert not flag.exists()
 
 
-def test_account_blob_path_is_inside_the_accounts_dir(monkeypatch, tmp_path):
-    monkeypatch.setenv("CODEX_SWAP_HOME", str(tmp_path / "store"))
-    blob = paths.account_blob_path(3, "carol@example.com")
-    assert blob.parent == paths.accounts_dir()
+def test_blob_names_are_readable_and_include_the_slot(tmp_path):
+    """The store is meant to be inspectable with `ls` when something is wrong."""
+    from codex_swap.store import AccountStore
+
+    blob = AccountStore(tmp_path / "store").blob_path(3, "carol@example.com")
     assert blob.name == "auth-3-carol@example.com.json"

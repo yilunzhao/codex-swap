@@ -123,6 +123,18 @@ class AccountStore:
     def exists(self) -> bool:
         return self.sequence_path.exists()
 
+    def looks_like_store(self) -> bool:
+        """Whether ``root`` plausibly holds a codex-swap store.
+
+        Deliberately lenient — a store whose sequence.json was lost is still a
+        store — but never true for an arbitrary directory of unrelated files.
+        """
+        if self.sequence_path.exists() or self.accounts_dir.is_dir():
+            return True
+        if not self.root.exists():
+            return False
+        return not any(self.root.iterdir())
+
     # -- state -----------------------------------------------------------
 
     def load(self) -> StoreState:

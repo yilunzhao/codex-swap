@@ -108,9 +108,16 @@ class TestStateRepair:
         )
         assert 1 in state.accounts
 
-    def test_garbage_shapes_do_not_crash(self):
-        for payload in ({"accounts": "not a dict"}, {"sequence": "abc"}, {}):
-            assert isinstance(StoreState.from_dict(payload), StoreState)
+    @pytest.mark.parametrize(
+        "payload", [{"accounts": "not a dict"}, {"sequence": "abc"}, {}, {"accounts": None}]
+    )
+    def test_garbage_shapes_degrade_to_an_empty_store(self, payload):
+        """Not merely "does not crash": a malformed file must read as no
+        accounts, never as a partially-populated store that a swap would act on."""
+        state = StoreState.from_dict(payload)
+        assert state.accounts == {}
+        assert state.sequence == []
+        assert state.active_slot is None
 
 
 class TestLookups:

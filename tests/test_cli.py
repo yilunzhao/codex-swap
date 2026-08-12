@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 
 import pytest
 
@@ -473,3 +475,25 @@ def test_credentials_never_reach_stdout(run, run_json, logged_in, capsys):
     out = capsys.readouterr().out
     for needle in ("id_token", "access_token", "refresh_token", "rt.alice", "at.alice"):
         assert needle not in out
+
+
+def test_module_entry_point_runs(tmp_path):
+    """`python -m codex_swap` is a documented way in; it had no test."""
+    import subprocess
+    import sys
+
+    env = {
+        **os.environ,
+        "PYTHONPATH": str(Path(__file__).resolve().parent.parent / "src"),
+        "CODEX_SWAP_HOME": str(tmp_path / "store"),
+        "CODEX_HOME": str(tmp_path / "codex"),
+    }
+    result = subprocess.run(
+        [sys.executable, "-m", "codex_swap", "--version"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+    )
+    assert result.returncode == 0
+    assert "codex-swap" in result.stdout

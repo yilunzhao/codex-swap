@@ -30,6 +30,21 @@ class AccountExistsError(CodexSwapError):
     exit_code = 2
 
 
+class ValidationError(CodexSwapError):
+    """An argument was well-formed for argparse but meaningless to the store."""
+
+    exit_code = 2
+
+
+class UnreadableAuthError(CodexSwapError):
+    """A credential file exists but its bytes could not be read or decoded.
+
+    Distinct from "absent" on purpose: reporting an unreadable auth.json as "no
+    login" would send the user to `codex login`, silently discarding a file that
+    may hold a recoverable refresh token.
+    """
+
+
 class StoreError(CodexSwapError):
     """The on-disk account store is missing, unreadable, or inconsistent."""
 

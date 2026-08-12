@@ -17,6 +17,8 @@ import os
 import tempfile
 from pathlib import Path
 
+from codex_swap.exceptions import UnreadableAuthError
+
 #: Owner-only file / directory modes. No-ops on Windows, where ACLs inherited
 #: from the user profile already restrict access.
 FILE_MODE = 0o600
@@ -70,6 +72,18 @@ def read_text(path: Path) -> str | None:
         return None
     except IsADirectoryError:  # pragma: no cover - POSIX race after the is_dir check
         return None
+    except UnicodeDecodeError as exc:
+        # Reporting this as "absent" would send the user to `codex login` and
+        # quietly discard a file that may still hold a usable refresh token.
+        raise UnreadableAuthError(
+            f"{path} is not valid UTF-8 ({exc.reason}); it may be truncated or "
+            f"written in another encoding"
+        ) from exc
+    except PermissionError as exc:
+        raise UnreadableAuthError(
+            f"{path} cannot be read: {exc.strerror}. If it was created by `sudo codex`, "
+            f"fix its ownership rather than deleting it"
+        ) from exc
 
 
 def is_private(path: Path) -> bool | None:

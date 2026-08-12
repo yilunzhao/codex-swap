@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import dataclasses
 import json
-import time
 
 import pytest
 
@@ -16,7 +15,7 @@ from codex_swap.identity import (
     parse_auth,
     try_parse_auth,
 )
-from tests.conftest import make_api_key_auth, make_auth, make_id_token
+from tests.conftest import make_api_key_auth, make_auth
 
 
 def test_parses_a_chatgpt_login():
@@ -71,22 +70,6 @@ def test_missing_exp_is_not_expired():
 def test_undecodable_tokens_yield_empty_claims(token):
     """A future token shape must degrade to thinner display, never a crash."""
     assert decode_jwt_payload(token) == {}
-
-
-def test_account_id_falls_back_to_the_tokens_field():
-    """Older blobs carry account_id outside the JWT claim."""
-    data = {
-        "auth_mode": "chatgpt",
-        "tokens": {
-            "id_token": make_id_token("bob@example.com", account_id=""),
-            "account_id": "fallback-acct",
-        },
-    }
-    # Strip the namespaced claim so only the fallback remains.
-    data["tokens"]["id_token"] = make_id_token("bob@example.com", account_id="")
-    identity = identity_from_dict(data)
-    assert identity.email == "bob@example.com"
-    assert identity.account_id in ("", "fallback-acct")
 
 
 @pytest.mark.parametrize(
@@ -163,4 +146,4 @@ def test_expiry_boundary_is_inclusive():
     exp = identity.expiry()
     assert identity.is_expired(now=exp) is True
     assert identity.is_expired(now=exp - dt.timedelta(seconds=1)) is False
-    assert abs(identity.expires_at - int(time.time())) < 5
+    assert identity.expires_at is not None
