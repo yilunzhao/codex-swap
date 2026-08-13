@@ -1,7 +1,7 @@
 """Command-line interface.
 
 Presentation only: every command resolves its arguments, calls into
-:class:`codex_swap.switcher.Switcher`, and renders the result. Business rules
+:class:`codex_account_switcher.switcher.Switcher`, and renders the result. Business rules
 live in the switcher and the store so they can be tested without stdout.
 
 Both a human table and ``--json`` are produced from the same result objects, so
@@ -15,14 +15,14 @@ import json
 import sys
 from pathlib import Path
 
-from codex_swap import __version__, paths, printer, process_detection
-from codex_swap.exceptions import CodexSwapError, StoreError, ValidationError
-from codex_swap.fsutil import is_private, read_text, write_secret
-from codex_swap.identity import try_parse_auth
-from codex_swap.models import Identity, Platform
-from codex_swap.printer import bold, cyan, dim, green, red, yellow
-from codex_swap.store import AccountStore
-from codex_swap.switcher import Switcher
+from codex_account_switcher import __version__, paths, printer, process_detection
+from codex_account_switcher.exceptions import CodexSwapError, StoreError, ValidationError
+from codex_account_switcher.fsutil import is_private, read_text, write_secret
+from codex_account_switcher.identity import try_parse_auth
+from codex_account_switcher.models import Identity, Platform
+from codex_account_switcher.printer import bold, cyan, dim, green, red, yellow
+from codex_account_switcher.store import AccountStore
+from codex_account_switcher.switcher import Switcher
 
 RESTART_HINT = "Restart Codex (or start a new session) to pick up the new account."
 
@@ -167,7 +167,7 @@ def cmd_list(args: argparse.Namespace, sw: Switcher) -> int:
         return 0
 
     if not rows:
-        print(dim("No managed accounts yet. Run `codex-swap add` or `codex-swap login`."))
+        print(dim("No managed accounts yet. Run `xswap add` or `xswap login`."))
         return 0
 
     print(bold("Managed Codex accounts") + dim(f"  ({printer.abbreviate(sw.store.root)})"))
@@ -183,10 +183,10 @@ def cmd_list(args: argparse.Namespace, sw: Switcher) -> int:
 
     print()
     if live_identity is None:
-        print(dim(f"Live auth.json: none — no Codex login at {printer.abbreviate(sw.auth_file)}"))
+        print(dim(f"Live auth.json: none. No Codex login at {printer.abbreviate(sw.auth_file)}"))
     elif live_account is None:
         printer.warn(f"the live login ({live_identity.email}) is not managed.")
-        print(dim("  Run `codex-swap add` to capture it before switching away."))
+        print(dim("  Run `xswap add` to capture it before switching away."))
     return 0
 
 
@@ -354,7 +354,7 @@ def cmd_export(args: argparse.Namespace, sw: Switcher) -> int:
     print(f"{green('Exported')} {len(bundle['accounts'])} account(s) to {target}")
     for item in missing:
         printer.warn(f"skipped {item}: no stored credentials")
-    printer.warn("that file contains live OAuth tokens — keep it out of git and cloud sync.")
+    printer.warn("that file contains live OAuth tokens. Keep it out of git and cloud sync.")
     return 0
 
 
@@ -397,7 +397,7 @@ def cmd_purge(args: argparse.Namespace, sw: Switcher) -> int:
     # reads as though something was destroyed.
     if not sw.store.looks_like_store():
         raise StoreError(
-            f"{root} does not look like a codex-swap store (no sequence.json and "
+            f"{root} does not look like an xswap store (no sequence.json and "
             f"no accounts directory); refusing to delete it"
         )
     if not args.json:
@@ -452,7 +452,7 @@ def cmd_doctor(args: argparse.Namespace, sw: Switcher) -> int:
         problems.append("the process list could not be read, so no running-Codex check was made")
     elif scan.holders:
         problems.append(
-            f"{len(scan.holders)} Codex process(es) running — a swap may be overwritten"
+            f"{len(scan.holders)} Codex process(es) running, so a swap may be overwritten"
         )
 
     if args.json:
@@ -476,7 +476,7 @@ def cmd_doctor(args: argparse.Namespace, sw: Switcher) -> int:
         )
         return 1 if problems else 0
 
-    print(bold("codex-swap doctor"))
+    print(bold("xswap doctor"))
     print(f"  version      {__version__}")
     print(f"  platform     {Platform.detect().name.lower()}  python {sys.version.split()[0]}")
     print(f"  CODEX_HOME   {printer.abbreviate(paths.codex_home())}")
@@ -505,25 +505,25 @@ def cmd_doctor(args: argparse.Namespace, sw: Switcher) -> int:
 
 EPILOG = """\
 examples:
-  codex-swap add                     capture the current ~/.codex/auth.json
-  codex-swap login                   snapshot, run `codex login`, store the new account
-  codex-swap list                    show every managed account
-  codex-swap switch                  rotate to the next account
-  codex-swap use 2                   switch to a specific slot
-  codex-swap use me@example.com      ... or to an email
-  codex-swap doctor                  diagnose a swap that did not stick
+  xswap add                     capture the current ~/.codex/auth.json
+  xswap login                   snapshot, run `codex login`, store the new account
+  xswap list                    show every managed account
+  xswap switch                  rotate to the next account
+  xswap use 2                   switch to a specific slot
+  xswap use me@example.com      ... or to an email
+  xswap doctor                  diagnose a swap that did not stick
 """
 
 
 def _add_global_flags(target: argparse.ArgumentParser, *, suppress: bool) -> None:
     """Declare the flags that work both before and after the sub-command.
 
-    ``codex-swap status --json`` is what people actually type, so these are
+    ``xswap status --json`` is what people actually type, so these are
     attached to every sub-parser as well as to the top level.
 
     The sub-parser copies use ``default=argparse.SUPPRESS`` so that an unused
     copy does not write ``False`` over a value the top-level parser already set
-    — otherwise ``codex-swap --json status`` would silently print a human table,
+    Otherwise ``xswap --json status`` would silently print a human table,
     because a sub-parser parses into a fresh namespace which is then copied
     wholesale onto the real one.
 
@@ -531,7 +531,7 @@ def _add_global_flags(target: argparse.ArgumentParser, *, suppress: bool) -> Non
     one via ``parents=``. ``ArgumentParser.set_defaults`` mutates the ``default``
     attribute of matching actions in place, so a shared action would have its
     ``SUPPRESS`` quietly rewritten by whichever parser called ``set_defaults``
-    first — which is exactly the bug this arrangement avoids.
+    first, which is exactly the bug this arrangement avoids.
     """
     default = argparse.SUPPRESS if suppress else None
 
@@ -553,12 +553,12 @@ def _sub_flag_parent() -> argparse.ArgumentParser:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="codex-swap",
+        prog="xswap",
         description="Multi-account switcher for the Codex CLI.",
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version=f"codex-swap {__version__}")
+    parser.add_argument("--version", action="version", version=f"xswap {__version__}")
     # The top level owns the real defaults; the sub-parsers only override.
     _add_global_flags(parser, suppress=False)
     parser.set_defaults(json=False, no_color=False, yes=False, store=None)

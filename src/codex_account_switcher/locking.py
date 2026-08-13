@@ -1,6 +1,6 @@
 """Cross-platform advisory lock around store mutations.
 
-Two codex-swap processes racing on a swap could interleave "back up the live
+Two xswap processes racing on a swap could interleave "back up the live
 blob" with "overwrite the live blob" and lose an account's refresh token, so
 every mutating command runs under this lock.
 
@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from types import TracebackType
 
-from codex_swap.exceptions import LockTimeout
+from codex_account_switcher.exceptions import LockTimeout
 
 if os.name == "nt":  # pragma: no cover - exercised on the Windows CI job
     import msvcrt
@@ -79,7 +79,7 @@ class FileLock:
             if time.monotonic() >= deadline:
                 fh.close()
                 raise LockTimeout(
-                    f"another codex-swap operation is in progress (lock held on {self.path})"
+                    f"another xswap operation is in progress (lock held on {self.path})"
                 )
             time.sleep(_POLL_INTERVAL)
 

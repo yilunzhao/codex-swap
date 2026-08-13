@@ -6,7 +6,7 @@ than usual for this tool: the file being replaced is the only copy of a live
 OAuth refresh token, and a half-written ``auth.json`` means a re-login.
 
 The temp file is created with 0600 by ``mkstemp`` and chmod'ed again before the
-rename, so the secret is never briefly world-readable — writing then chmod'ing
+rename, so the secret is never briefly world-readable. Writing then chmod'ing
 the final path would leave exactly that window.
 """
 
@@ -17,7 +17,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from codex_swap.exceptions import UnreadableAuthError
+from codex_account_switcher.exceptions import UnreadableAuthError
 
 #: Owner-only file / directory modes. No-ops on Windows, where ACLs inherited
 #: from the user profile already restrict access.
@@ -60,7 +60,7 @@ def read_text(path: Path) -> str | None:
     A directory is reported as "no file", not as an error, because callers use
     this to ask whether an account blob exists. The explicit ``is_dir`` check is
     load-bearing on Windows, which raises ``PermissionError`` rather than
-    ``IsADirectoryError`` when a directory is opened for reading — catching
+    ``IsADirectoryError`` when a directory is opened for reading. Catching
     ``PermissionError`` instead would swallow genuine permission problems on
     real files.
     """

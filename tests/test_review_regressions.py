@@ -3,7 +3,7 @@
 Every test here corresponds to a bug that the original 338-test suite passed
 straight over. They are kept together, rather than scattered into the topical
 files, because what they have in common is the reason they were missed: each one
-lives at a seam between two pieces that were individually well covered — a value
+lives at a seam between two pieces that were individually well covered: a value
 read before a write that later invalidates it, a flag whose two meanings differ
 only in intent, an argv the process lister cannot unambiguously split.
 """
@@ -15,19 +15,19 @@ import json
 
 import pytest
 
-from codex_swap import paths, printer
-from codex_swap.cli import main
-from codex_swap.exceptions import (
+from codex_account_switcher import paths, printer
+from codex_account_switcher.cli import main
+from codex_account_switcher.exceptions import (
     AccountExistsError,
     StoreError,
     UnreadableAuthError,
     ValidationError,
 )
-from codex_swap.fsutil import read_text, write_secret
-from codex_swap.paths import auth_path
-from codex_swap.process_detection import ProcessScan, _classify, _scan_posix
-from codex_swap.store import AccountStore
-from codex_swap.switcher import Switcher
+from codex_account_switcher.fsutil import read_text, write_secret
+from codex_account_switcher.paths import auth_path
+from codex_account_switcher.process_detection import ProcessScan, _classify, _scan_posix
+from codex_account_switcher.store import AccountStore
+from codex_account_switcher.switcher import Switcher
 from tests.conftest import make_auth
 
 
@@ -37,7 +37,7 @@ class TestSelfSwitchDoesNotSwapBlobs:
     The stored blob was read at the top of `switch_to`, *before* the back-up step
     rewrote that same file. When the target and the previous account are the same
     slot, writing that stale value back to the live file pushed the pre-refresh
-    token over a credential Codex had since renewed — losing precisely what the
+    token over a credential Codex had since renewed, losing precisely what the
     back-up had just preserved, while printing "Switched to".
     """
 
@@ -216,7 +216,7 @@ class TestPurgeScope:
         (victim / "important").mkdir(parents=True)
         (victim / "important" / "thesis.tex").write_text("my thesis", encoding="utf-8")
 
-        with pytest.raises(StoreError, match="does not look like a codex-swap store"):
+        with pytest.raises(StoreError, match="does not look like an xswap store"):
             Switcher(store=AccountStore(victim)).purge()
         assert (victim / "important" / "thesis.tex").exists()
 
@@ -286,9 +286,9 @@ class TestProcessListingWithSpaces:
 
 class TestUnavailableProcessListing:
     def test_human_output_says_the_check_did_not_run(self, switcher, live_auth, capsys, tmp_path):
-        """Silence reads as "nothing is running" — the one conclusion this check
+        """Silence reads as "nothing is running", the one conclusion this check
         must never imply without having run."""
-        from codex_swap import process_detection
+        from codex_account_switcher import process_detection
 
         live_auth(make_auth("a@e.com", account_id="acct-a"))
         switcher.add_live()
@@ -303,7 +303,7 @@ class TestUnavailableProcessListing:
         assert "could not read the process list" in out
 
     def test_doctor_reports_it_as_a_problem(self, capsys, tmp_path):
-        from codex_swap import process_detection
+        from codex_account_switcher import process_detection
 
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(process_detection, "scan", lambda *a, **k: ProcessScan(unavailable=True))
@@ -381,7 +381,7 @@ class TestFilesystemErrorsAreClean:
         def full_disk(*args, **kwargs):
             raise OSError(28, "No space left on device")
 
-        monkeypatch.setattr("codex_swap.cli.AccountStore.load", full_disk)
+        monkeypatch.setattr("codex_account_switcher.cli.AccountStore.load", full_disk)
         capsys.readouterr()
         code = main(["--store", str(switcher.store.root), "list"])
         assert code == 1
@@ -390,7 +390,7 @@ class TestFilesystemErrorsAreClean:
 
 def test_migration_still_renames_the_prototype_accounts_dir(tmp_path, monkeypatch):
     """Guard against the lock refactor having skipped the rename."""
-    legacy = tmp_path / "home" / paths.LEGACY_STORE_DIRNAME
+    legacy = tmp_path / "home" / paths.PROTOTYPE_STORE_DIRNAME
     (legacy / "auth").mkdir(parents=True)
     (legacy / "sequence.json").write_text('{"accounts": {}}', encoding="utf-8")
     (legacy / "auth" / "auth-1-a@example.com.json").write_text("{}", encoding="utf-8")
@@ -409,7 +409,7 @@ def test_purge_refuses_before_warning_or_prompting(tmp_path, capsys):
 
     assert main(["--store", str(victim), "purge", "--yes"]) == 1
     captured = capsys.readouterr()
-    assert "does not look like a codex-swap store" in captured.err
+    assert "does not look like an xswap store" in captured.err
     assert "deletes every stored account" not in captured.out
     assert (victim / "keep").exists()
 
@@ -420,8 +420,8 @@ class TestHostileAuthShapes:
     in the JSON output."""
 
     def test_deeply_nested_json_is_a_parse_error(self):
-        from codex_swap.exceptions import AuthParseError
-        from codex_swap.identity import parse_auth
+        from codex_account_switcher.exceptions import AuthParseError
+        from codex_account_switcher.identity import parse_auth
 
         with pytest.raises(AuthParseError, match="nesting is too deep"):
             parse_auth("[" * 200_000 + "]" * 200_000)
@@ -429,21 +429,21 @@ class TestHostileAuthShapes:
     def test_a_deeply_nested_id_token_payload_degrades(self):
         import base64
 
-        from codex_swap.identity import decode_jwt_payload
+        from codex_account_switcher.identity import decode_jwt_payload
 
         payload = base64.urlsafe_b64encode(b"[" * 200_000).decode().rstrip("=")
         assert decode_jwt_payload(f"a.{payload}.c") == {}
 
     def test_a_non_string_auth_mode_is_not_carried_into_the_store(self):
-        from codex_swap.identity import identity_from_dict
+        from codex_account_switcher.identity import identity_from_dict
 
         identity = identity_from_dict({"auth_mode": {"x": 1}, "OPENAI_API_KEY": "sk-abcdefgh"})
         assert isinstance(identity.auth_mode, str)
         assert identity.auth_mode == "apikey"
 
     def test_the_cli_reports_a_hostile_auth_file_cleanly(self, tmp_path, capsys):
-        from codex_swap.fsutil import write_secret
-        from codex_swap.paths import auth_path
+        from codex_account_switcher.fsutil import write_secret
+        from codex_account_switcher.paths import auth_path
 
         write_secret(auth_path(), "[" * 200_000 + "]" * 200_000)
         capsys.readouterr()
@@ -456,7 +456,7 @@ def test_the_migration_failure_path_reports_cleanly(tmp_path, monkeypatch):
     verified that a half-moved store surfaces as a message rather than a crash."""
     import shutil
 
-    legacy = tmp_path / "home" / paths.LEGACY_STORE_DIRNAME
+    legacy = tmp_path / "home" / paths.PROTOTYPE_STORE_DIRNAME
     legacy.mkdir(parents=True)
     (legacy / "sequence.json").write_text('{"accounts": {}}', encoding="utf-8")
 
@@ -466,3 +466,82 @@ def test_the_migration_failure_path_reports_cleanly(tmp_path, monkeypatch):
     monkeypatch.setattr(shutil, "move", failing_move)
     with pytest.raises(StoreError, match=r"Migration .* failed"):
         paths.migrate_legacy_store(tmp_path / "store")
+
+
+class TestNamesakeStoreIsLeftAlone:
+    """An unrelated PyPI project also called `codex-swap` keeps its accounts in
+    `~/.codex-swap`, the root this tool used up to 0.2.0. Its layout is
+    `accounts/<slot>/auth.json`; ours is a flat `accounts/auth-<slot>-<email>.json`.
+
+    Confusing the two would migrate, or delete, another program's credentials.
+    """
+
+    def _theirs(self, root):
+        (root / "accounts" / "1").mkdir(parents=True)
+        (root / "accounts" / "1" / "auth.json").write_text("THEIRS", encoding="utf-8")
+        (root / "sequence.json").write_text(
+            '{"sequence": [1], "accounts": {"1": {"email": "a@e.com"}}}', encoding="utf-8"
+        )
+        (root / "state.json").write_text("{}", encoding="utf-8")
+        return root
+
+    def _ours(self, root):
+        (root / "accounts").mkdir(parents=True)
+        (root / "accounts" / "auth-1-a@example.com.json").write_text("OURS", encoding="utf-8")
+        (root / "sequence.json").write_text('{"accounts": {}}', encoding="utf-8")
+        return root
+
+    def test_layout_detection(self, tmp_path):
+        assert paths.holds_our_layout(self._ours(tmp_path / "ours")) is True
+        assert paths.holds_our_layout(self._theirs(tmp_path / "theirs")) is False
+
+    def test_an_empty_store_of_ours_still_counts(self, tmp_path):
+        root = tmp_path / "fresh"
+        root.mkdir()
+        (root / "sequence.json").write_text('{"accounts": {}}', encoding="utf-8")
+        assert paths.holds_our_layout(root) is True
+
+    def test_migration_leaves_their_store_where_it_is(self, tmp_path, monkeypatch):
+        theirs = self._theirs(tmp_path / "home" / paths.FORMER_STORE_DIRNAME)
+        target = tmp_path / "new-store"
+
+        assert paths.migrate_legacy_store(target) is False
+        assert (theirs / "accounts" / "1" / "auth.json").read_text(encoding="utf-8") == "THEIRS"
+        assert not target.exists()
+
+    def test_migration_brings_our_own_former_store_forward(self, tmp_path, monkeypatch):
+        ours = self._ours(tmp_path / "home" / paths.FORMER_STORE_DIRNAME)
+        target = tmp_path / "new-store"
+
+        assert paths.migrate_legacy_store(target) is True
+        assert not ours.exists()
+        assert (target / "accounts" / "auth-1-a@example.com.json").exists()
+
+    def test_purge_refuses_their_store(self, tmp_path):
+        theirs = self._theirs(tmp_path / "theirs")
+        with pytest.raises(StoreError, match="does not look like"):
+            Switcher(store=AccountStore(theirs)).purge()
+        assert (theirs / "accounts" / "1" / "auth.json").exists()
+
+    def test_cli_purge_refuses_their_store(self, tmp_path, capsys):
+        theirs = self._theirs(tmp_path / "theirs")
+        capsys.readouterr()
+        assert main(["--store", str(theirs), "purge", "--yes"]) == 1
+        assert (theirs / "accounts" / "1" / "auth.json").exists()
+
+
+class TestStoreHomeEnvironment:
+    def test_xswap_home_is_honoured(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("XSWAP_HOME", str(tmp_path / "a"))
+        assert paths.store_root() == tmp_path / "a"
+
+    def test_the_old_variable_still_works(self, monkeypatch, tmp_path):
+        """Anyone who exported CODEX_SWAP_HOME against 0.2.0 keeps working."""
+        monkeypatch.delenv("XSWAP_HOME", raising=False)
+        monkeypatch.setenv("CODEX_SWAP_HOME", str(tmp_path / "b"))
+        assert paths.store_root() == tmp_path / "b"
+
+    def test_the_new_variable_wins(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("XSWAP_HOME", str(tmp_path / "new"))
+        monkeypatch.setenv("CODEX_SWAP_HOME", str(tmp_path / "old"))
+        assert paths.store_root() == tmp_path / "new"

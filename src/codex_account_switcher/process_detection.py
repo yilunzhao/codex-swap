@@ -2,14 +2,14 @@
 
 A running Codex holds its OAuth tokens in memory and writes a refreshed copy
 back to ``auth.json`` when they near expiry. If one is alive across a swap it
-can overwrite the account that was just activated — the swap appears to work and
+can overwrite the account that was just activated: the swap appears to work and
 then silently undoes itself minutes later. Every mutating command therefore
 reports what is running.
 
 Three things make this harder than grepping for "codex":
 
 * The npm distribution launches the real binary through a Node shim, so the
-  process listing shows ``node /path/bin/codex app-server`` — argv[0] is
+  process listing shows ``node /path/bin/codex app-server``, where argv[0] is
   ``node``. Matching only argv[0] misses it.
 * That shim then spawns the native binary, so one logical session shows up
   twice. A holder whose parent is also a holder is a wrapper and is dropped,
@@ -146,15 +146,15 @@ def _candidates(tokens: list[str], start: int):
     """Yield the plausible readings of the argv entry beginning at ``start``.
 
     ``ps`` joins argv with spaces, so an executable path that itself contains a
-    space — ``~/Library/Application Support/...``, a standard editor-extension
-    location — is indistinguishable from two separate arguments. Splitting on
+    space (``~/Library/Application Support/...``, a standard editor-extension
+    location) is indistinguishable from two separate arguments. Splitting on
     whitespace and looking only at the first fragment misses those entirely,
     which is a false negative in the dangerous direction: the user is told
     nothing is running while a live Codex is about to overwrite the swap.
 
     Fragments are rejoined left to right, stopping before any fragment that
     starts with "/" or "-". A continuation of the same path never does, while a
-    genuinely separate argument usually does — which is what keeps
+    genuinely separate argument usually does, which is what keeps
     ``vim /some/dir/codex`` from being read as the codex binary.
     """
     end = start

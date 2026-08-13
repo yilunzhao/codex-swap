@@ -11,8 +11,8 @@ import time
 
 import pytest
 
-from codex_swap.exceptions import LockTimeout
-from codex_swap.locking import FileLock
+from codex_account_switcher.exceptions import LockTimeout
+from codex_account_switcher.locking import FileLock
 
 #: Import path for the subprocess helpers below, which run outside pytest and so
 #: do not inherit the `pythonpath` setting from pyproject.toml.
@@ -48,8 +48,8 @@ def test_a_second_process_is_blocked(tmp_path):
         f"""
         import sys
         sys.path.insert(0, {SRC!r})
-        from codex_swap.locking import FileLock
-        from codex_swap.exceptions import LockTimeout
+        from codex_account_switcher.locking import FileLock
+        from codex_account_switcher.exceptions import LockTimeout
         try:
             with FileLock({str(lock_path)!r}, timeout=0.4):
                 print("ACQUIRED")
@@ -70,7 +70,7 @@ def test_the_lock_is_released_for_the_next_process(tmp_path):
         f"""
         import sys
         sys.path.insert(0, {SRC!r})
-        from codex_swap.locking import FileLock
+        from codex_account_switcher.locking import FileLock
         with FileLock({str(lock_path)!r}, timeout=2):
             print("ACQUIRED")
         """
@@ -85,16 +85,16 @@ def test_the_lock_is_released_for_the_next_process(tmp_path):
 
 def test_timeout_raises_lock_timeout(tmp_path, monkeypatch):
     lock = FileLock(tmp_path / ".lock", timeout=0.2)
-    monkeypatch.setattr("codex_swap.locking._try_acquire", lambda fh: False)
+    monkeypatch.setattr("codex_account_switcher.locking._try_acquire", lambda fh: False)
     start = time.monotonic()
-    with pytest.raises(LockTimeout, match="another codex-swap operation"):
+    with pytest.raises(LockTimeout, match="another xswap operation"):
         lock.acquire()
     assert time.monotonic() - start >= 0.2
 
 
 def test_timeout_does_not_leak_a_file_handle(tmp_path, monkeypatch):
     """The handle opened for a failed acquire must be closed, not left dangling."""
-    monkeypatch.setattr("codex_swap.locking._try_acquire", lambda fh: False)
+    monkeypatch.setattr("codex_account_switcher.locking._try_acquire", lambda fh: False)
     lock = FileLock(tmp_path / ".lock", timeout=0.05)
     with pytest.raises(LockTimeout):
         lock.acquire()

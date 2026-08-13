@@ -1,4 +1,4 @@
-"""Value types shared across codex-swap."""
+"""Value types shared across xswap."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def timestamp() -> str:
 class Identity:
     """Who an auth.json blob belongs to.
 
-    Decoded locally from the ``id_token`` JWT payload; codex-swap never calls
+    Decoded locally from the ``id_token`` JWT payload; xswap never calls
     the network to work out an account's identity.
     """
 

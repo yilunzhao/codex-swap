@@ -3,7 +3,7 @@
 Colour is opt-out in three ways, checked in order: an explicit
 ``--no-color``/``--json`` from the CLI, the ``NO_COLOR`` convention
 (https://no-color.org), and finally whether stdout is a TTY. That last check is
-what keeps ``codex-swap list | grep`` free of escape sequences.
+what keeps ``xswap list | grep`` free of escape sequences.
 """
 
 from __future__ import annotations

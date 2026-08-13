@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-12
+
+### Changed
+
+- **Renamed.** The PyPI distribution is now `codex-account-switcher` and the
+  command is `xswap`. The name `codex-swap` was already taken on PyPI by an
+  unrelated project with a similar purpose, and sharing a distribution name, an
+  import package name (`codex_swap`) and a console script would have meant two
+  installs clobbering each other. The import package is now
+  `codex_account_switcher`. The old `codex-swap` command is gone.
+- **The store moved** to `~/.xswap` (`$XDG_DATA_HOME/xswap` on Linux/WSL),
+  overridable with `$XSWAP_HOME`. `$CODEX_SWAP_HOME` still works for anyone who
+  exported it. A `~/.codex-swap` written by an earlier version of this tool is
+  migrated forward automatically.
+- The operation log inside the store is now `xswap.log`.
+
+### Fixed
+
+- A `~/.codex-swap` belonging to the *other* project is now left strictly alone.
+  The two layouts are distinguishable on disk (ours is a flat
+  `accounts/auth-<slot>-<email>.json`, theirs is `accounts/<slot>/auth.json`),
+  and the migration is gated on recognising ours. Before this, `list` read their
+  store as accounts with missing credentials and `purge --yes` deleted their
+  real ones. `purge` now refuses any directory it does not recognise as its own.
+
+
 ## [0.2.0] - 2026-08-12
 
 A review of 0.1.0 turned up several ways to lose a credential. Everything in
@@ -36,7 +62,7 @@ A review of 0.1.0 turned up several ways to lose a credential. Everything in
   a failed write left the store advertising an account whose blob was gone.
 - **`export` shipped a pre-refresh credential for the active account**; it now
   snapshots the live file first, as every other write path already did.
-- **Process detection missed any Codex whose path contains a space** — including
+- **Process detection missed any Codex whose path contains a space**, including
   `~/Library/Application Support/...`, a standard editor-extension location.
   A false negative here means the user is told nothing is running while a live
   Codex is about to overwrite the swap.
@@ -67,8 +93,8 @@ A review of 0.1.0 turned up several ways to lose a credential. Everything in
   "safe"), relative names under a `dir_fd` (how `shutil.rmtree` deletes every
   child, so a whole directory could be emptied while only the final `rmdir` was
   refused), symlinked paths (`abspath` does not follow links, and a `~/.codex`
-  synced through Dropbox is one), fd-based calls, and subprocesses — which
-  matters here because `login` shells out to the real `codex`. All are now
+  synced through Dropbox is one), fd-based calls, and subprocesses, which
+  matter here because `login` shells out to the real `codex`. All are now
   closed, and spawning the real `codex` binary from a test is refused outright.
 - The guard's own control tests aimed their write and delete probes at the
   developer's real `~/.codex`; one of them called `shutil.rmtree` on it. They
@@ -90,20 +116,20 @@ A review of 0.1.0 turned up several ways to lose a credential. Everything in
 Mutation testing of 0.1.0 found that 22 of 36 deliberate defects passed the
 suite. The gaps are closed and each new test names the mutation it catches:
 
-- Nothing asserted that any mutating operation took the store lock — the lock
-  could be removed from `add` and `switch_to` with the suite still green.
+- Nothing asserted that any mutating operation took the store lock; it could be
+  removed from `add` and `switch_to` with the suite still green.
 - The running-Codex warning, the entire point of process detection, was
   rendered in no test: every CLI test stubbed the scan to an empty result.
 - Four of `doctor`'s seven diagnostics could be deleted silently, because the
   tests asserted only that *some* problem was reported.
-- The interactive confirmation prompt could be inverted — answering `n` to
+- The interactive confirmation prompt could be inverted, so answering `n` to
   "Delete the store?" would have purged it.
 - `cmd_login`, the only command that spawns a subprocess and rewrites live
   credentials, had no test at any level.
 - Also now covered: atomic-write staging directory, `fsync`, identity type
   coercions, the `account_id` fallback for pre-JWT-claim blobs, rotation
   ordering, corrupt stored blobs during export, WSL detection, and
-  `python -m codex_swap`.
+  `python -m codex_account_switcher`.
 
 Three assertions that could never fail were replaced with ones that can.
 
@@ -119,7 +145,7 @@ First release.
 - `--json` on every command, so the tool can be scripted without parsing the
   human table.
 - Identity (email, plan, account id, expiry) decoded locally from the `id_token`
-  JWT payload — no network access on any read path.
+  JWT payload , no network access on any read path.
 - Support for both ChatGPT sign-in and API-key logins, and for one ChatGPT login
   backing several workspaces (accounts are keyed on email *and* account id).
 - Warning about running Codex processes before a swap, since they hold the
@@ -131,6 +157,7 @@ First release.
   `auth.json`.
 - One-time migration from the pre-release `~/.codex-swap-backup` layout.
 
-[Unreleased]: https://github.com/yilunzhao/codex-swap/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/yilunzhao/codex-swap/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/yilunzhao/codex-swap/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/yilunzhao/codex-swap/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/yilunzhao/codex-swap/releases/tag/v0.1.0

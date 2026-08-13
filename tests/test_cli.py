@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from codex_swap.cli import build_parser, main
-from codex_swap.paths import auth_path
+from codex_account_switcher.cli import build_parser, main
+from codex_account_switcher.paths import auth_path
 from tests.conftest import make_auth
 
 
@@ -21,7 +21,7 @@ def no_running_codex(monkeypatch):
     depend on whatever the developer (or the CI runner) happens to be running.
     Detection itself is covered in test_process_detection.py.
     """
-    from codex_swap import process_detection
+    from codex_account_switcher import process_detection
 
     monkeypatch.setattr(process_detection, "scan", lambda *a, **k: process_detection.ProcessScan())
 
@@ -60,7 +60,7 @@ def run_json(run, capsys):
 
 @pytest.fixture
 def logged_in():
-    from codex_swap.fsutil import write_secret
+    from codex_account_switcher.fsutil import write_secret
 
     def _write(email="alice@example.com", **kwargs):
         text = make_auth(email, **kwargs)
@@ -79,7 +79,7 @@ class TestParser:
         with pytest.raises(SystemExit) as exc:
             main(["--version"])
         assert exc.value.code == 0
-        assert "codex-swap" in capsys.readouterr().out
+        assert "xswap" in capsys.readouterr().out
 
     def test_unknown_command_exits_two(self):
         with pytest.raises(SystemExit) as exc:
@@ -231,7 +231,7 @@ class TestSwitching:
 
     def test_switch_replaces_the_live_file(self, two_accounts):
         two_accounts("switch")
-        from codex_swap.identity import parse_auth
+        from codex_account_switcher.identity import parse_auth
 
         assert parse_auth(auth_path().read_text(encoding="utf-8")).email == "bob@example.com"
 
@@ -282,9 +282,9 @@ class TestStatusAndDoctor:
 
     def test_doctor_is_clean_on_a_healthy_setup(self, run, logged_in, capsys, monkeypatch):
         monkeypatch.setattr(
-            "codex_swap.process_detection.scan",
+            "codex_account_switcher.process_detection.scan",
             lambda *a, **k: __import__(
-                "codex_swap.process_detection", fromlist=["ProcessScan"]
+                "codex_account_switcher.process_detection", fromlist=["ProcessScan"]
             ).ProcessScan(),
         )
         logged_in()
@@ -372,7 +372,7 @@ class TestTransfer:
         logged_in()
         run("add")
         run("export", str(tmp_path / "bundle.json"))
-        assert "keep it out of git" in capsys.readouterr().out
+        assert "Keep it out of git" in capsys.readouterr().out
 
 
 class TestJsonContract:
@@ -478,7 +478,7 @@ def test_credentials_never_reach_stdout(run, run_json, logged_in, capsys):
 
 
 def test_module_entry_point_runs(tmp_path):
-    """`python -m codex_swap` is a documented way in; it had no test."""
+    """`python -m codex_account_switcher` is a documented way in; it had no test."""
     import subprocess
     import sys
 
@@ -489,11 +489,11 @@ def test_module_entry_point_runs(tmp_path):
         "CODEX_HOME": str(tmp_path / "codex"),
     }
     result = subprocess.run(
-        [sys.executable, "-m", "codex_swap", "--version"],
+        [sys.executable, "-m", "codex_account_switcher", "--version"],
         capture_output=True,
         text=True,
         env=env,
         timeout=60,
     )
     assert result.returncode == 0
-    assert "codex-swap" in result.stdout
+    assert "xswap" in result.stdout

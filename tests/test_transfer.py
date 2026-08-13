@@ -6,9 +6,9 @@ import json
 
 import pytest
 
-from codex_swap.exceptions import StoreError
-from codex_swap.store import AccountStore
-from codex_swap.switcher import BUNDLE_FORMAT, Switcher
+from codex_account_switcher.exceptions import StoreError
+from codex_account_switcher.store import AccountStore
+from codex_account_switcher.switcher import BUNDLE_FORMAT, Switcher
 from tests.conftest import make_auth
 
 

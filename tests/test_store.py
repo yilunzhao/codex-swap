@@ -6,9 +6,9 @@ import json
 
 import pytest
 
-from codex_swap.exceptions import AccountNotFoundError, StoreError
-from codex_swap.models import Account
-from codex_swap.store import AccountStore, StoreState
+from codex_account_switcher.exceptions import AccountNotFoundError, StoreError
+from codex_account_switcher.models import Account
+from codex_account_switcher.store import AccountStore, StoreState
 
 
 def _account(slot: int, email: str, account_id: str = "") -> Account:

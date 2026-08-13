@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Thanks for the report. Please do not paste the contents of `auth.json`
-        or an `export` bundle — both contain live OAuth tokens.
+        or an `export` bundle. Both contain live OAuth tokens.
 
   - type: textarea
     id: what-happened

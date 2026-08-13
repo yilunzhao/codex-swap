@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from codex_swap import printer
+from codex_account_switcher import printer
 
 
 @pytest.fixture(autouse=True)
@@ -116,7 +116,7 @@ class TestParseIso:
         assert printer.parse_iso(value) is None
 
     def test_round_trip_with_the_models_timestamp(self):
-        from codex_swap.models import timestamp
+        from codex_account_switcher.models import timestamp
 
         assert printer.parse_iso(timestamp()) is not None
 

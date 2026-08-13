@@ -6,14 +6,14 @@ import json
 
 import pytest
 
-from codex_swap.exceptions import (
+from codex_account_switcher.exceptions import (
     AccountExistsError,
     AccountNotFoundError,
     AuthParseError,
     StoreError,
     SwitchError,
 )
-from codex_swap.identity import parse_auth
+from codex_account_switcher.identity import parse_auth
 from tests.conftest import make_api_key_auth, make_auth
 
 
@@ -328,7 +328,7 @@ class TestLogin:
             switcher.write_live("{}")  # codex half-wrote something
             return 1
 
-        from codex_swap.exceptions import CodexCliError
+        from codex_account_switcher.exceptions import CodexCliError
 
         with pytest.raises(CodexCliError, match="status 1"):
             switcher.login(runner=failing_login)
@@ -348,7 +348,7 @@ class TestLogin:
         assert "second" in switcher.store.read_blob(result.account)
 
     def test_missing_auth_after_login_is_reported(self, switcher):
-        from codex_swap.exceptions import CodexCliError
+        from codex_account_switcher.exceptions import CodexCliError
 
         def fake_login(command):
             return 0  # claims success, writes nothing

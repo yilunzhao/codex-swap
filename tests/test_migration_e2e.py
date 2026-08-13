@@ -13,10 +13,10 @@ import json
 
 import pytest
 
-from codex_swap import paths
-from codex_swap.cli import main
-from codex_swap.store import AccountStore
-from codex_swap.switcher import Switcher
+from codex_account_switcher import paths
+from codex_account_switcher.cli import main
+from codex_account_switcher.store import AccountStore
+from codex_account_switcher.switcher import Switcher
 from tests.conftest import make_auth
 
 
@@ -24,7 +24,7 @@ from tests.conftest import make_auth
 def prototype_store(tmp_path, monkeypatch):
     """Build a store in the exact shape the prototype wrote."""
     monkeypatch.delenv("CODEX_SWAP_HOME", raising=False)
-    legacy = tmp_path / "home" / paths.LEGACY_STORE_DIRNAME
+    legacy = tmp_path / "home" / paths.PROTOTYPE_STORE_DIRNAME
     (legacy / "auth").mkdir(parents=True)
 
     (legacy / "sequence.json").write_text(

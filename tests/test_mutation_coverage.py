@@ -19,14 +19,14 @@ import sys
 
 import pytest
 
-from codex_swap import identity as identity_mod
-from codex_swap import process_detection
-from codex_swap.cli import main
-from codex_swap.fsutil import write_secret
-from codex_swap.identity import identity_from_dict
-from codex_swap.models import Platform
-from codex_swap.process_detection import CodexProcess, ProcessScan
-from codex_swap.store import AccountStore, StoreState
+from codex_account_switcher import identity as identity_mod
+from codex_account_switcher import process_detection
+from codex_account_switcher.cli import main
+from codex_account_switcher.fsutil import write_secret
+from codex_account_switcher.identity import identity_from_dict
+from codex_account_switcher.models import Platform
+from codex_account_switcher.process_detection import CodexProcess, ProcessScan
+from codex_account_switcher.store import AccountStore, StoreState
 from tests.conftest import make_auth, make_id_token
 
 # ---------------------------------------------------------------------------
@@ -39,13 +39,13 @@ class TestMutatingOperationsTakeTheLock:
     and `add` passed 338/338.
 
     `locking.py` was tested exhaustively on its own, but nothing asserted that a
-    caller ever used it — leaving the interleaving the module docstring warns
+    caller ever used it, leaving the interleaving the module docstring warns
     about (back up the live blob / overwrite the live blob) entirely unguarded.
     """
 
     @pytest.fixture
     def recording_lock(self, monkeypatch):
-        from codex_swap import switcher as switcher_mod
+        from codex_account_switcher import switcher as switcher_mod
 
         taken: list[str] = []
         real = switcher_mod.FileLock
@@ -94,8 +94,8 @@ class TestMutatingOperationsTakeTheLock:
         """The recording fixture proves the call happens; this proves the call
         means something. (Cross-process blocking itself is covered in
         test_locking.py; this is the store-lock path specifically.)"""
-        from codex_swap.exceptions import LockTimeout
-        from codex_swap.locking import FileLock
+        from codex_account_switcher.exceptions import LockTimeout
+        from codex_account_switcher.locking import FileLock
 
         switcher.add(make_auth("a@e.com", account_id="acct-a"))
         with FileLock(switcher.store.lock_path), pytest.raises(LockTimeout):
@@ -232,7 +232,7 @@ class TestDoctorDiagnosticsIndividually:
 
 
 class TestConfirmationPrompt:
-    """MUTATION: inverting `… in ("y", "yes")` survived — typing `n` at
+    """MUTATION: inverting `… in ("y", "yes")` survived, so typing `n` at
     "Delete the store?" would have purged it. Only the `--yes` and
     non-interactive branches were covered.
     """
@@ -282,7 +282,7 @@ class TestConfirmationPrompt:
 
 
 class TestLoginCommand:
-    """GAP: `cmd_login` and `_run_codex_login` had no test at any level — the
+    """GAP: `cmd_login` and `_run_codex_login` had no test at any level: the
     one command that spawns a subprocess and rewrites live credentials.
 
     The runner is injected here; the audit hook in conftest refuses to spawn the
@@ -299,7 +299,7 @@ class TestLoginCommand:
             write_secret(switcher.auth_file, make_auth("new@e.com", account_id="acct-new"))
             return 0
 
-        monkeypatch.setattr("codex_swap.switcher._run_codex_login", runner)
+        monkeypatch.setattr("codex_account_switcher.switcher._run_codex_login", runner)
         monkeypatch.setattr("shutil.which", lambda name: f"/usr/local/bin/{name}")
         return calls
 
@@ -327,7 +327,7 @@ class TestLoginCommand:
 
     def test_a_failed_login_is_reported(self, switcher, monkeypatch, capsys):
         monkeypatch.setattr("shutil.which", lambda name: "/usr/local/bin/codex")
-        monkeypatch.setattr("codex_swap.switcher._run_codex_login", lambda command: 1)
+        monkeypatch.setattr("codex_account_switcher.switcher._run_codex_login", lambda command: 1)
         capsys.readouterr()
         assert main(["--store", str(switcher.store.root), "login"]) == 4
         assert "exited with status 1" in capsys.readouterr().err
@@ -342,8 +342,8 @@ class TestAtomicWriteStaging:
     def test_the_temp_file_is_staged_in_the_destination_directory(self, tmp_path, monkeypatch):
         """MUTATION: dropping `dir=` from `mkstemp` survived.
 
-        Staging in the system temp dir makes `os.replace` cross-filesystem — an
-        unconditional OSError whenever $CODEX_HOME is on another mount — and
+        Staging in the system temp dir makes `os.replace` cross-filesystem (an
+        unconditional OSError whenever $CODEX_HOME is on another mount), and
         leaves the credential in a shared directory if the process dies.
         """
         import tempfile as tempfile_mod
@@ -376,7 +376,7 @@ class TestIdentityCoercions:
         return {"auth_mode": "chatgpt", "tokens": {"id_token": f"{header}.{body}.sig"}}
 
     def test_a_non_string_email_is_not_accepted_as_an_identity(self):
-        from codex_swap.exceptions import AuthParseError
+        from codex_account_switcher.exceptions import AuthParseError
 
         blob = self._blob({"email": {"nested": "object"}})
         with pytest.raises(AuthParseError, match="no account identity"):
@@ -403,7 +403,7 @@ class TestIdentityCoercions:
 
     def test_the_account_id_falls_back_to_the_tokens_field(self):
         """MUTATION: dropping `or tokens.get("account_id")` survived, because the
-        old test asserted `account_id in ("", "fallback-acct")` — accepting both
+        old test asserted `account_id in ("", "fallback-acct")`, accepting both
         the right answer and the broken one.
 
         Real impact: a pre-JWT-claim blob keys as ("bob@…", ""), so the same
@@ -469,7 +469,7 @@ class TestJsonFlagIsHonoured:
         assert not out.lstrip().startswith("{")
 
     def test_token_state_column_reflects_expiry(self, switcher, capsys):
-        """MUTATION: `_token_state` always returning "unreadable" survived — the
+        """MUTATION: `_token_state` always returning "unreadable" survived: the
         freshness column in `list` was asserted nowhere."""
         switcher.add(make_auth("fresh@e.com", account_id="acct-f", expires_in=3600))
         switcher.add(make_auth("stale@e.com", account_id="acct-s", expires_in=-3600))
@@ -513,13 +513,14 @@ class TestPlatformDetection:
 
     def test_wsl_stores_under_xdg_not_the_home_dotfile(self, monkeypatch, tmp_path):
         """The consequence of getting WSL wrong: the store lands elsewhere."""
-        from codex_swap import paths
+        from codex_account_switcher import paths
 
         monkeypatch.setattr("platform.system", lambda: "Linux")
         monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
+        monkeypatch.delenv("XSWAP_HOME", raising=False)
         monkeypatch.delenv("CODEX_SWAP_HOME", raising=False)
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-        assert paths.store_root() == tmp_path / "xdg" / "codex-swap"
+        assert paths.store_root() == tmp_path / "xdg" / "xswap"
 
 
 class TestDiscardedWarningIsRendered:
@@ -543,7 +544,9 @@ def test_store_save_rejects_unserialisable_state(store, monkeypatch):
     parse fails on the *next* command, far from the cause.
     """
     state = StoreState()
-    monkeypatch.setattr("codex_swap.store.json.dumps", lambda *a, **k: "{definitely not json")
+    monkeypatch.setattr(
+        "codex_account_switcher.store.json.dumps", lambda *a, **k: "{definitely not json"
+    )
     with pytest.raises(ValueError):
         store.save(state)
     assert not store.sequence_path.exists()

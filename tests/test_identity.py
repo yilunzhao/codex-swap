@@ -8,8 +8,8 @@ import json
 
 import pytest
 
-from codex_swap.exceptions import AuthParseError
-from codex_swap.identity import (
+from codex_account_switcher.exceptions import AuthParseError
+from codex_account_switcher.identity import (
     decode_jwt_payload,
     identity_from_dict,
     parse_auth,

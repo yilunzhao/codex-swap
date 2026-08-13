@@ -7,8 +7,8 @@ import subprocess
 
 import pytest
 
-from codex_swap import process_detection
-from codex_swap.process_detection import (
+from codex_account_switcher import process_detection
+from codex_account_switcher.process_detection import (
     CodexProcess,
     ProcessScan,
     _classify,
@@ -94,7 +94,7 @@ class TestDetection:
         seen = {p.pid for p in result.holders} | {p.pid for p in result.helpers}
         assert pid not in seen, why
 
-    def test_codex_swap_itself_is_not_counted(self, fake_ps):
+    def test_codex_account_switcher_itself_is_not_counted(self, fake_ps):
         """Otherwise every run would warn about itself."""
         fake_ps("  100     1 /usr/local/bin/codex-swap switch\n")
         result = _scan_posix(set())

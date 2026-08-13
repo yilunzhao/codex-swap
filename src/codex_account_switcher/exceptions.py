@@ -1,4 +1,4 @@
-"""Exception hierarchy for codex-swap.
+"""Exception hierarchy for xswap.
 
 Every failure the CLI is expected to hit derives from :class:`CodexSwapError`,
 so ``cli.main`` can turn it into a one-line message and a non-zero exit status
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 
 class CodexSwapError(Exception):
-    """Base class for every expected codex-swap failure."""
+    """Base class for every expected xswap failure."""
 
     exit_code = 1
 
@@ -54,7 +54,7 @@ class SwitchError(CodexSwapError):
 
 
 class LockTimeout(CodexSwapError):
-    """Another codex-swap process holds the store lock."""
+    """Another xswap process holds the store lock."""
 
     exit_code = 3
 

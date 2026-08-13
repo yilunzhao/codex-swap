@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from codex_swap import paths
-from codex_swap.exceptions import StoreError
-from codex_swap.models import Platform
+from codex_account_switcher import paths
+from codex_account_switcher.exceptions import StoreError
+from codex_account_switcher.models import Platform
 
 
 def test_codex_home_follows_the_env_var(monkeypatch, tmp_path):
@@ -29,47 +29,51 @@ def test_codex_home_expands_a_tilde(monkeypatch):
 
 
 def test_store_root_prefers_an_absolute_override(monkeypatch, tmp_path):
-    monkeypatch.setenv("CODEX_SWAP_HOME", str(tmp_path / "store"))
+    monkeypatch.setenv("XSWAP_HOME", str(tmp_path / "store"))
     assert paths.store_root() == tmp_path / "store"
 
 
 def test_store_root_ignores_a_relative_override(monkeypatch):
     """A relative value must not create a store in the working directory."""
-    monkeypatch.setenv("CODEX_SWAP_HOME", "relative/path")
+    monkeypatch.setenv("XSWAP_HOME", "relative/path")
     monkeypatch.setattr(Platform, "detect", classmethod(lambda cls: Platform.MACOS))
-    assert paths.store_root() == Path.home() / ".codex-swap"
+    assert paths.store_root() == Path.home() / ".xswap"
 
 
 @pytest.mark.parametrize("platform", [Platform.MACOS, Platform.WINDOWS, Platform.UNKNOWN])
 def test_store_root_on_non_xdg_platforms(monkeypatch, platform):
+    monkeypatch.delenv("XSWAP_HOME", raising=False)
     monkeypatch.delenv("CODEX_SWAP_HOME", raising=False)
     monkeypatch.setattr(Platform, "detect", classmethod(lambda cls: platform))
-    assert paths.store_root() == Path.home() / ".codex-swap"
+    assert paths.store_root() == Path.home() / ".xswap"
 
 
 @pytest.mark.parametrize("platform", [Platform.LINUX, Platform.WSL])
 def test_store_root_follows_xdg(monkeypatch, tmp_path, platform):
+    monkeypatch.delenv("XSWAP_HOME", raising=False)
     monkeypatch.delenv("CODEX_SWAP_HOME", raising=False)
     monkeypatch.setattr(Platform, "detect", classmethod(lambda cls: platform))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    assert paths.store_root() == tmp_path / "xdg" / "codex-swap"
+    assert paths.store_root() == tmp_path / "xdg" / "xswap"
 
 
 @pytest.mark.parametrize("value", ["", "not/absolute"])
 def test_xdg_is_ignored_when_unset_or_relative(monkeypatch, value):
     """The XDG spec says to ignore the variable unless it is absolute."""
+    monkeypatch.delenv("XSWAP_HOME", raising=False)
     monkeypatch.delenv("CODEX_SWAP_HOME", raising=False)
     monkeypatch.setattr(Platform, "detect", classmethod(lambda cls: Platform.LINUX))
     monkeypatch.setenv("XDG_DATA_HOME", value)
-    assert paths.store_root() == Path.home() / ".local" / "share" / "codex-swap"
+    assert paths.store_root() == Path.home() / ".local" / "share" / "xswap"
 
 
 def test_xdg_expands_a_tilde(monkeypatch):
     """systemd units and Dockerfiles set the value without a shell to expand it."""
+    monkeypatch.delenv("XSWAP_HOME", raising=False)
     monkeypatch.delenv("CODEX_SWAP_HOME", raising=False)
     monkeypatch.setattr(Platform, "detect", classmethod(lambda cls: Platform.LINUX))
     monkeypatch.setenv("XDG_DATA_HOME", "~/data")
-    assert paths.store_root() == Path.home() / "data" / "codex-swap"
+    assert paths.store_root() == Path.home() / "data" / "xswap"
 
 
 @pytest.mark.parametrize(
@@ -94,7 +98,7 @@ def test_slugify_blocks_path_traversal():
 
 class TestLegacyMigration:
     def _legacy(self, tmp_path, monkeypatch) -> Path:
-        legacy = tmp_path / "home" / paths.LEGACY_STORE_DIRNAME
+        legacy = tmp_path / "home" / paths.PROTOTYPE_STORE_DIRNAME
         legacy.mkdir(parents=True, exist_ok=True)
         (legacy / "sequence.json").write_text('{"accounts": {}}', encoding="utf-8")
         return legacy
@@ -150,7 +154,7 @@ class TestLegacyMigration:
         """The flag must not be a licence to delete credentials.
 
         An interrupted *cross-filesystem* move leaves the legacy copy partial and
-        the target complete — the exact inverse of what the flag was taken to
+        the target complete, the exact inverse of what the flag was taken to
         mean. Since the two cases are indistinguishable from disk, the only safe
         reading is to refuse and let the user look.
         """
@@ -200,7 +204,7 @@ class TestLegacyMigration:
 
 def test_blob_names_are_readable_and_include_the_slot(tmp_path):
     """The store is meant to be inspectable with `ls` when something is wrong."""
-    from codex_swap.store import AccountStore
+    from codex_account_switcher.store import AccountStore
 
     blob = AccountStore(tmp_path / "store").blob_path(3, "carol@example.com")
     assert blob.name == "auth-3-carol@example.com.json"

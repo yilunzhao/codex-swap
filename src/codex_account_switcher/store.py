@@ -1,14 +1,14 @@
 """The on-disk account store.
 
-Layout (see :mod:`codex_swap.paths` for where the root lives)::
+Layout (see :mod:`codex_account_switcher.paths` for where the root lives)::
 
     <store_root>/
         sequence.json                       rotation order, active slot, metadata
         accounts/auth-<slot>-<email>.json   one captured auth.json per account
         .lock                               advisory lock for mutations
-        codex-swap.log                       append-only operation log
+        xswap.log                            append-only operation log
 
-``sequence.json`` holds only metadata — email, plan, label — so it can be read
+``sequence.json`` holds only metadata (email, plan, label), so it can be read
 for ``list`` without ever opening a credential file. The credential blobs are
 byte-for-byte copies of what Codex itself wrote, which is what lets a restored
 account work without Codex noticing anything happened.
@@ -21,10 +21,10 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from codex_swap import paths
-from codex_swap.exceptions import AccountNotFoundError, StoreError
-from codex_swap.fsutil import ensure_private_dir, read_text, write_secret
-from codex_swap.models import Account, timestamp
+from codex_account_switcher import paths
+from codex_account_switcher.exceptions import AccountNotFoundError, StoreError
+from codex_account_switcher.fsutil import ensure_private_dir, read_text, write_secret
+from codex_account_switcher.models import Account, timestamp
 
 SCHEMA_VERSION = 1
 
@@ -115,7 +115,7 @@ class AccountStore:
 
     @property
     def log_path(self) -> Path:
-        return self.root / "codex-swap.log"
+        return self.root / "xswap.log"
 
     def blob_path(self, slot: int, email: str) -> Path:
         return self.accounts_dir / f"auth-{slot}-{paths.slugify(email)}.json"
@@ -124,15 +124,18 @@ class AccountStore:
         return self.sequence_path.exists()
 
     def looks_like_store(self) -> bool:
-        """Whether ``root`` plausibly holds a codex-swap store.
+        """Whether ``root`` plausibly holds *this tool's* account store.
 
-        Deliberately lenient — a store whose sequence.json was lost is still a
-        store — but never true for an arbitrary directory of unrelated files.
+        Lenient about damage (a store whose sequence.json was lost is still a
+        store) and strict about ownership: an arbitrary directory is never a
+        store, and neither is one written by the unrelated ``codex-swap``
+        project, whose ``accounts/<slot>/`` layout `purge` would otherwise
+        happily delete.
         """
-        if self.sequence_path.exists() or self.accounts_dir.is_dir():
-            return True
         if not self.root.exists():
             return False
+        if paths.holds_our_layout(self.root):
+            return True
         return not any(self.root.iterdir())
 
     # -- state -----------------------------------------------------------

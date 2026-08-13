@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from codex_swap.fsutil import ensure_private_dir, is_private, read_text, write_secret
+from codex_account_switcher.fsutil import ensure_private_dir, is_private, read_text, write_secret
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
 

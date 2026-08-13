@@ -2,13 +2,13 @@
 
 Codex writes one of two shapes into ``auth.json``:
 
-* ChatGPT sign-in — ``tokens`` holds an ``id_token``/``access_token``/
+* ChatGPT sign-in: ``tokens`` holds an ``id_token``/``access_token``/
   ``refresh_token`` triple. Email, plan and account id live in the *unverified*
   payload of the ``id_token`` JWT, under the ``https://api.openai.com/auth``
   claim.
-* API key — ``OPENAI_API_KEY`` is set and there are no tokens.
+* API key: ``OPENAI_API_KEY`` is set and there are no tokens.
 
-The JWT is decoded, never verified: codex-swap only needs the labels it carries
+The JWT is decoded, never verified: xswap only needs the labels it carries
 to tell one stored account from another, and the token is one Codex itself
 wrote to a 0600 file in the user's own home directory. Nothing here touches the
 network, so ``list``/``status`` stay instant and work offline.
@@ -21,8 +21,8 @@ import binascii
 import json
 from typing import Any
 
-from codex_swap.exceptions import AuthParseError
-from codex_swap.models import Identity
+from codex_account_switcher.exceptions import AuthParseError
+from codex_account_switcher.models import Identity
 
 #: Namespaced claim the OpenAI identity provider puts plan/account metadata in.
 _AUTH_CLAIM = "https://api.openai.com/auth"
@@ -31,7 +31,7 @@ _AUTH_CLAIM = "https://api.openai.com/auth"
 def decode_jwt_payload(token: str) -> dict[str, Any]:
     """Return the payload of a JWT without verifying its signature.
 
-    Returns an empty dict for anything that is not a decodable JWT payload —
+    Returns an empty dict for anything that is not a decodable JWT payload;
     callers treat missing claims as "unknown", never as an error, so that a
     future token shape degrades into a thinner display rather than a crash.
     """

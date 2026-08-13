@@ -7,7 +7,7 @@ that also unwinds would already be gone by then.
 
 Every probe here is aimed at :data:`conftest.SENTINEL_ROOT`, a path that is a
 member of ``PROTECTED_ROOTS`` but names nothing on disk. Aiming them at the
-developer's real ``~/.codex`` — as the first version of this file did — gives a
+developer's real ``~/.codex`` (as the first version of this file did) gives a
 test that passes only while the guard works, and deletes real credentials the
 day it stops. A separate test asserts the real roots are covered, without
 attacking them.
@@ -90,7 +90,7 @@ class TestControls:
 
     def test_isolated_env_points_away_from_the_real_paths(self):
         """The first isolation layer is doing its job too."""
-        from codex_swap import paths
+        from codex_account_switcher import paths
 
         for resolved in (paths.codex_home(), paths.store_root()):
             assert not any(
@@ -156,7 +156,7 @@ class TestBypassAttempts:
     def test_a_relative_name_under_a_protected_dir_fd_is_refused(self, tmp_path):
         """How `shutil.rmtree` deletes children: a bare name plus a dir_fd.
 
-        Resolving that against the process CWD — which is what `abspath` does —
+        Resolving that against the process CWD, which is what `abspath` does,
         made every per-file deletion inside an rmtree invisible, so the
         front-door check on `shutil.rmtree` was all that stood in its way.
         """
@@ -197,7 +197,7 @@ class TestBypassAttempts:
         """Audit hooks are per-process; a child inherits none of this.
 
         `codex login` rewrites the developer's real auth.json, and `cmd_login`
-        shells out to it — so a CLI test written without an injected runner
+        shells out to it, so a CLI test written without an injected runner
         would overwrite live credentials with the guard none the wiser.
         """
         with _blocked():

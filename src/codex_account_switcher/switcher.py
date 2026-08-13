@@ -21,8 +21,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from codex_swap import paths
-from codex_swap.exceptions import (
+from codex_account_switcher import paths
+from codex_account_switcher.exceptions import (
     AccountExistsError,
     AuthParseError,
     CodexCliError,
@@ -30,11 +30,11 @@ from codex_swap.exceptions import (
     SwitchError,
     ValidationError,
 )
-from codex_swap.fsutil import read_text, write_secret
-from codex_swap.identity import parse_auth, try_parse_auth
-from codex_swap.locking import FileLock
-from codex_swap.models import Account, Identity
-from codex_swap.store import AccountStore, StoreState
+from codex_account_switcher.fsutil import read_text, write_secret
+from codex_account_switcher.identity import parse_auth, try_parse_auth
+from codex_account_switcher.locking import FileLock
+from codex_account_switcher.models import Account, Identity
+from codex_account_switcher.store import AccountStore, StoreState
 
 BUNDLE_FORMAT = "codex-swap-export"
 BUNDLE_VERSION = 1
@@ -125,7 +125,7 @@ class Switcher:
             refresh_existing: update this same identity in place if it is already
                 managed. Separate from ``force`` so that re-storing an account
                 you already have never implies permission to destroy someone
-                else's credentials — the distinction ``login`` depends on.
+                else's credentials. That distinction is what ``login`` depends on.
 
         Raises:
             ValidationError: the slot number is not a usable slot.
@@ -210,7 +210,7 @@ class Switcher:
     def add_live(self, **kwargs) -> AddResult:
         text = self.live_auth()
         if text is None:
-            raise StoreError(f"no Codex login found at {self.auth_file} — run `codex login` first")
+            raise StoreError(f"no Codex login found at {self.auth_file}; run `codex login` first")
         kwargs.setdefault("from_live", True)
         return self.add(text, **kwargs)
 
@@ -245,8 +245,8 @@ class Switcher:
             blob = self.store.read_blob(target)
             if not blob:
                 raise SwitchError(
-                    f"slot {target.slot} ({target.email}) has no stored credentials — "
-                    f"re-add it with `codex-swap login`"
+                    f"slot {target.slot} ({target.email}) has no stored credentials; "
+                    f"re-add it with `xswap login`"
                 )
             try:
                 parse_auth(blob)
@@ -274,14 +274,14 @@ class Switcher:
                 discarded = original_identity
             elif original is not None:
                 # Present but unparseable. Still being destroyed, so still worth
-                # saying out loud — an unknown token shape is likelier than junk.
+                # saying out loud: an unknown token shape is likelier than junk.
                 discarded_unreadable = True
 
             if previous is not None and previous.slot == target.slot:
                 # Already on this account. `blob` was read before the back-up
                 # above rewrote that very file, so writing it now would push the
                 # pre-refresh token back over a live one Codex has since
-                # renewed — losing exactly what the back-up just preserved.
+                # renewed, losing exactly what the back-up just preserved.
                 state.active_slot = target.slot
                 self.store.save(state)
                 self.store.log(f"switch no-op slot={target.slot} (already active)")
@@ -321,9 +321,9 @@ class Switcher:
         """Switch to the next account in the rotation."""
         state = self.store.load()
         if not state.accounts:
-            raise StoreError("no accounts are managed yet — run `codex-swap add`")
+            raise StoreError("no accounts are managed yet; run `xswap add`")
         if len(state.sequence) < 2:
-            raise StoreError("only one account is managed — add another with `codex-swap login`")
+            raise StoreError("only one account is managed; add another with `xswap login`")
         current = self.current_account(state)
         anchor = current.slot if current is not None else state.active_slot
         return self.switch_to(state.accounts[self.store.next_in_rotation(state, anchor)])
@@ -370,7 +370,7 @@ class Switcher:
         if new_text is None:
             raise CodexCliError(f"`codex login` reported success but {self.auth_file} is missing")
         # Whatever was just logged into should be stored, including a re-login
-        # of an account that already has a slot — but `refresh_existing`, not
+        # of an account that already has a slot, but via `refresh_existing`, not
         # `force`: re-storing your own account must never carry permission to
         # overwrite a *different* account that happens to occupy `slot`.
         return self.add(
@@ -455,7 +455,7 @@ class Switcher:
     def purge(self) -> Path:
         """Delete the whole store. The live ``auth.json`` is left alone.
 
-        Refuses a directory that does not look like a codex-swap store. `--store`
+        Refuses a directory that does not look like an xswap store. `--store`
         is a plain path, so a mistyped or unset variable would otherwise turn
         `purge --yes` into an unbounded recursive delete of whatever it pointed
         at.
@@ -465,7 +465,7 @@ class Switcher:
             return root
         if not self.store.looks_like_store():
             raise StoreError(
-                f"{root} does not look like a codex-swap store (no sequence.json and "
+                f"{root} does not look like an xswap store (no sequence.json and "
                 f"no accounts directory); refusing to delete it"
             )
         # The lock file itself is removed after the lock is released, so this
