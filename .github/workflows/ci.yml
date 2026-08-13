@@ -86,8 +86,11 @@ jobs:
         run: |
           python -m venv /tmp/smoke
           /tmp/smoke/bin/pip install dist/*.whl
-          /tmp/smoke/bin/codex-swap --version
-          /tmp/smoke/bin/xswap --help > /dev/null
+          /tmp/smoke/bin/xswap --version
+          /tmp/smoke/bin/codex-account-switcher --help > /dev/null
+          # The name `codex-swap` belongs to an unrelated PyPI project; shipping
+          # a command by that name would clobber theirs in ~/.local/bin.
+          test ! -e /tmp/smoke/bin/codex-swap
       - uses: actions/upload-artifact@v7
         with:
           name: dist
